@@ -1,0 +1,6 @@
+{
+	"organization": "[organization]",
+	"project": "[project]",
+	"repositoryId": "[repositoryId]",
+	"personalAccessToken": "[personalAccessToken]"
+}
