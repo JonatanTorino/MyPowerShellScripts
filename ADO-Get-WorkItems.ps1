@@ -3,10 +3,11 @@ Puntos a tener en cuenta para la correcta obtencion de los datos requeridos
 1 	
 	Asegurarse que se tenga un PAT (Personal Access Token) con los permisos necesarios y que no este Expirado,
 	chequear desde https://dev.azure.com/[Proyecto]/_usersSettings/tokens.
-	Permisos necesarios para el PAT Code y WorkItems 
+	Configurar el PAT con permisos de lectura para: Code y WorkItems
 2 
 	Tener el archivo Json DevOpsAzureREST.config.json en el mismo directorio donde se ejecuta este Script 
 	que es de donde se obtienen las configuraciones para el presente archivo.
+	https://dev.azure.com/[organization]/[project]/_git/[repositoryId]
 #> 
 
 # Solicitar el ID de la pull request como parámetro obligatorio
