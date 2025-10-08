@@ -2,19 +2,27 @@
 param (
     [Parameter(Mandatory = $true)]
     [string]$rutaBacpac
-    ,
+    #,
     # [Parameter(Mandatory=$true)]
-    [string]$urlDescargarBacpac
+    #[string]$urlDescargarBacpac
     ,
     [switch]$includeSwitch = $false
     ,
     [switch]$includeInstallSqlPackage = $false
     ,
     [switch]$skipBuildModels = $false
+    #,
+    #[switch]$reinstallCsu = $false
     ,
-    [switch]$reinstallCsu = $false
+    [string[]]$tablesToClean
+    ,
+    [string[]]$tablesToExclude
+    ,
+    [string[]]$modulesToBuild
     ,
     [switch]$skipCheckGitRepoUpdated = $false
+    ,
+    [switch]$skipCleanTables = $false
     ,
     [int] $MaxParallelism = 8
 )
@@ -28,7 +36,7 @@ function ImprimirTiempoTranscurrido {
     $horaActual = Get-Date
     $tiempoTranscurrido = $horaActual - $inicio
     # Imprime las marcas de tiempo y el tiempo transcurrido
-    Write-Host -ForegroundColor Green "$mensaje, Tiempo transcurrido : $tiempoTranscurrido"
+    Write-Information  -ForegroundColor Green "$mensaje, Tiempo transcurrido : $tiempoTranscurrido" -InformationAction Continue
 }
 
 if (!$skipCheckGitRepoUpdated) {
@@ -37,30 +45,30 @@ if (!$skipCheckGitRepoUpdated) {
 
 # Guarda la marca de tiempo de inicio
 $inicio = Get-Date
-Write-Host "Inicio: $inicio"
+Write-Information "Inicio: $inicio" -InformationAction Continue
 
-Write-Host "Instalando o actualizando modulo d365fo.tools"
+Write-Information "Instalando o actualizando modulo d365fo.tools" -InformationAction Continue
 .\InstallOrUpdateD365foTools.ps1
 
-Write-Host "Importando modulo d365fo.tools"
-Import-Module -Name d365fo.tools
+Write-Information "Importando modulo d365fo.tools" -InformationAction Continue
+Import-Module -Name d365fo.tools 
 
 # TODO Descartar este bloque para descargar. Luego implementaremos AzCopy
 # Verificar si $urlDescarga o $rutaBacpac están vacíos
-if ([string]::IsNullOrEmpty($urlDescarga) -eq $false) {
+#if ([string]::IsNullOrEmpty($urlDescarga) -eq $false) {
     # Descargar el archivo desde la URL proporcionada
-    Write-Host -ForegroundColor Yellow "Descargando bacpac"
-    Invoke-WebRequest -Uri $urlDescarga -OutFile $rutaBacpac
-    ImprimirTiempoTranscurrido("Descargado el bacpac")
-}
+    #Write-Host -ForegroundColor Yellow "Descargando bacpac"
+    #Invoke-WebRequest -Uri $urlDescarga -OutFile $rutaBacpac
+    #ImprimirTiempoTranscurrido("Descargado el bacpac")
+#}
 
 # Quitar la marca "unblock" del archivo descargado
 Unblock-File -Path $rutaBacpac
 
 # Descarga e instalación de SqlPackage
 if ($includeInstallSqlPackage) {
-    Write-Host -ForegroundColor Yellow "Instalando SqlPackage"
-    $SqlPackagePath = 'C:\Temp\d365fo.tools\SqlPackage'
+    Write-Information "Instalando SqlPackage" -InformationAction Continue
+    #$SqlPackagePath = 'C:\Temp\d365fo.tools\SqlPackage'
 
     # # Version number: 162.1.167
     # # Build number: 162.1.167
@@ -77,7 +85,10 @@ if ($includeInstallSqlPackage) {
 }
 
 # Limpio tablas para agilizar el import
-.\CleanBacpac.ps1 -rutaBacpac $rutaBacpac
+if (!$skipCleanTables){
+    .\SQL-CleanBacpac.ps1 -rutaBacpac $rutaBacpac -tables $tablesToClean -excludeTables $tablesToExclude
+}
+
 $ImportedDatabaseName = [System.IO.Path]::GetFileNameWithoutExtension($rutaBacpac)
 
 try {
@@ -88,19 +99,19 @@ try {
     #uso una variable para guardar el mensaje a imprimir para poder reusarla en el catch
     $pasoActual = "Iniciando la importación de la base $ImportedDatabaseName con el archivo '$rutaBacpac'"
     # Ejecuto la importación
-    Write-Host -ForegroundColor Yellow $pasoActual
+    Write-Information $pasoActual -InformationAction Continue
     Import-D365Bacpac -ImportModeTier1 -BacpacFile $rutaBacpac -NewDatabaseName $ImportedDatabaseName -MaxParallelism $MaxParallelism
     ImprimirTiempoTranscurrido("Bacpac importado")
 
     if ($includeSwitch) {
         $pasoActual = "Switcheando bases, deteniendo los servicios"
-        Write-Host -ForegroundColor Yellow $pasoActual
+        Write-Information $pasoActual -InformationAction Continue
         Stop-D365Environment
 
         [int]$AxDB_Original = (Get-D365Database -Name AXDB_ORIGINAL | Measure-Object).Count
         if ($AxDB_Original -gt 0) {
             $pasoActual = "Switcheando bases, removiendo AxDB_original"
-            Write-Host -ForegroundColor Yellow $pasoActual
+            Write-Information $pasoActual -InformationAction Continue
             Remove-D365Database -DatabaseName AxDB_original
         }
         ImprimirTiempoTranscurrido("AxDB switcheadas")
@@ -108,18 +119,19 @@ try {
         Switch-D365ActiveDatabase -SourceDatabaseName $ImportedDatabaseName
         if (!$skipBuildModels) {
             $pasoActual = "Compilando los módulos DevAx* FamiliaBercomat"
-            Write-Host -ForegroundColor Yellow $pasoActual
-            Invoke-D365ProcessModule -Module "DevAx*" -ExecuteCompile
-            Invoke-D365ProcessModule -Module "FamiliaBercomat" -ExecuteCompile
+            Write-Information $pasoActual -InformationAction Continue
+            foreach ($module in $modulesToBuild) {
+                Invoke-D365ProcessModule -Module $module -ExecuteCompile
+            }   
             ImprimirTiempoTranscurrido("Compilación terminada")
         }
 
         $pasoActual = "Iniciando servicios"
-        Write-Host -ForegroundColor Yellow $pasoActual
+        Write-Information $pasoActual -InformationAction Continue
         Start-D365EnvironmentV2 -Aos -Batch
         
         $pasoActual = "Sincronizando database"
-        Write-Host -ForegroundColor Yellow $pasoActual
+        Write-Information $pasoActual -InformationAction Continue
         Invoke-D365DbSync
         ImprimirTiempoTranscurrido("DB sincronizada")
     }
@@ -132,15 +144,15 @@ try {
     # }
 }
 catch {
-    Write-Host -ForegroundColor Red "Error desde el paso:"
-    Write-Host -ForegroundColor Red "`t$pasoActual"
-    Write-Host -ForegroundColor Red "`t$_.Exception.Message"
+    Write-Error "Error desde el paso:"
+    Write-Error "`t$pasoActual"
+    Write-Error "`t$_.Exception.Message"
 }
 
 # Guarda la marca de tiempo de finalización
 $fin = Get-Date
 # Imprime las marcas de tiempo y el tiempo transcurrido
-Write-Host "Inicio: $inicio"
-Write-Host "Final: $fin"
+Write-Information  "Inicio: $inicio" -InformationAction Continue
+Write-Information  "Final: $fin" -InformationAction Continue
 $tiempoTranscurrido = $fin - $inicio
-Write-Host -ForegroundColor Magenta "Tiempo total transcurrido: $tiempoTranscurrido"
+Write-Information  -ForegroundColor Magenta "Tiempo total transcurrido: $tiempoTranscurrido" -InformationAction Continue

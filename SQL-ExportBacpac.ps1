@@ -16,7 +16,7 @@ param (
 
 function Write-StatusMessage {
     param([string]$Message)
-    Write-Host "`n=== $Message ===" -ForegroundColor Cyan
+    Write-Information "`n=== $Message ===" -InformationAction Continue
 }
 
 try {
@@ -38,9 +38,9 @@ try {
 
     # Mostrar información de la operación
     Write-StatusMessage "Información de la operación"
-    Write-Host "Directorio de backup: $TargetPath"
-    Write-Host "Nombre de base de datos: $NewDatabaseName"
-    Write-Host "Archivo BACPAC: $BacpacFile"
+    Write-Information "Directorio de backup: $TargetPath" -InformationAction Continue
+    Write-Information "Nombre de base de datos: $NewDatabaseName" -InformationAction Continue
+    Write-Information "Archivo BACPAC: $BacpacFile" -InformationAction Continue
 
     # Generar el archivo BACPAC
     Write-StatusMessage "Generando archivo BACPAC $BacpacFile"
@@ -53,15 +53,15 @@ try {
     if (Test-Path $BacpacFile) {
         Write-StatusMessage "Archivo $BacpacFile generado exitosamente"
         $fileInfo = Get-Item $BacpacFile
-        Write-Host "Tamaño del archivo: $([math]::Round($fileInfo.Length / 1GB, 2)) GB"
+        Write-Information "Tamaño del archivo: $([math]::Round($fileInfo.Length / 1GB, 2)) GB" -InformationAction Continue
     }
     else {
         throw "No se pudo generar el archivo $BacpacFile"
     }
 }
 catch {
-    Write-Host "`nError: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "El proceso no se completó correctamente" -ForegroundColor Red
+    Write-Error "`nError: $($_.Exception.Message)"
+    Write-Error "El proceso no se completó correctamente"
 }
 finally {
     # Limpiar directorio temporal si existe
