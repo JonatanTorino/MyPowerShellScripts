@@ -6,11 +6,11 @@ param (
     # [Parameter(Mandatory=$true)]
     #[string]$urlDescargarBacpac
     ,
-    [switch]$includeSwitch = $false
+    [bool]$includeSwitch = $false
     ,
-    [switch]$includeInstallSqlPackage = $false
+    [bool]$includeInstallSqlPackage = $false
     ,
-    [switch]$skipBuildModels = $false
+    [bool]$skipBuildModels = $false
     #,
     #[switch]$reinstallCsu = $false
     ,
@@ -20,12 +20,15 @@ param (
     ,
     [string[]]$modulesToBuild
     ,
-    [switch]$skipCheckGitRepoUpdated = $false
+    [bool]$skipCheckGitRepoUpdated = $false
     ,
-    [switch]$skipCleanTables = $false
+    [bool]$skipCleanTables = $false
     ,
     [int] $MaxParallelism = 8
 )
+$tablesToClean = "$(tablesToClean)" -split ' '
+$tablesToExclude = "$(tablesToExclude)" -split ' '
+$modulesToBuild = "$(modulesToBuild)" -split ' '
 
 function ImprimirTiempoTranscurrido {
     param (
@@ -85,7 +88,7 @@ if ($includeInstallSqlPackage) {
 }
 
 # Limpio tablas para agilizar el import
-if (!$skipCleanTables){
+if (-not $skipCleanTables){
     .\SQL-CleanBacpac.ps1 -rutaBacpac $rutaBacpac -tables $tablesToClean -excludeTables $tablesToExclude
 }
 
