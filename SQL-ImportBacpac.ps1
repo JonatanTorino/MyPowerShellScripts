@@ -26,22 +26,29 @@ param (
     ,
     [int] $MaxParallelism = 8
 )
-if (-not [string]::IsNullOrWhiteSpace("$tablesToClean")) {
-    $tablesToClean = "$tablesToClean" -split ',' | Where-Object { $_ -ne '' }
+
+# Parsear tablesToClean
+if (-not [string]::IsNullOrWhiteSpace($tablesToClean)) {
+    $tablesToClean = $tablesToClean -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
+    Write-Information "Tablas a limpiar: $($tablesToClean -join ', ')" -InformationAction Continue
 } else {
     $tablesToClean = @()
 }
 
-if (-not [string]::IsNullOrWhiteSpace("$tablesToExclude")) {
-    $tablesToExclude = "$tablesToExclude" -split ',' | Where-Object { $_ -ne '' }
+# Parsear tablesToExclude
+if (-not [string]::IsNullOrWhiteSpace($tablesToExclude)) {
+    $tablesToExclude = $tablesToExclude -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
+    Write-Information "Tablas a excluir: $($tablesToExclude -join ', ')" -InformationAction Continue
 } else {
     $tablesToExclude = @()
 }
 
-if (-not [string]::IsNullOrWhiteSpace("$modelsToBuild")) {
-    $modelsToBuild = "$modelsToBuild" -split ',' | Where-Object { $_ -ne '' }
+# Parsear modulesToBuild
+if (-not [string]::IsNullOrWhiteSpace($modulesToBuild)) {
+    $modulesToBuild = $modulesToBuild -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
+    Write-Information "Módulos a compilar: $($modulesToBuild -join ', ')" -InformationAction Continue
 } else {
-    $modelsToBuild = @()
+    $modulesToBuild = @()
 }
 
 
