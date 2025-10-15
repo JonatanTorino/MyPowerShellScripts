@@ -18,7 +18,7 @@ param (
     ,
     [string[]]$tablesToExclude
     ,
-    [string[]]$modulesToBuild
+    [string[]]$modelsToBuild
     ,
     [bool]$skipCheckGitRepoUpdated = $false
     ,
@@ -26,9 +26,24 @@ param (
     ,
     [int] $MaxParallelism = 8
 )
-$tablesToClean = "$(tablesToClean)" -split ' '
-$tablesToExclude = "$(tablesToExclude)" -split ' '
-$modulesToBuild = "$(modulesToBuild)" -split ' '
+if (-not [string]::IsNullOrWhiteSpace("$tablesToClean")) {
+    $tablesToClean = "$tablesToClean" -split ',' | Where-Object { $_ -ne '' }
+} else {
+    $tablesToClean = @()
+}
+
+if (-not [string]::IsNullOrWhiteSpace("$tablesToExclude")) {
+    $tablesToExclude = "$tablesToExclude" -split ',' | Where-Object { $_ -ne '' }
+} else {
+    $tablesToExclude = @()
+}
+
+if (-not [string]::IsNullOrWhiteSpace("$modelsToBuild")) {
+    $modelsToBuild = "$modelsToBuild" -split ',' | Where-Object { $_ -ne '' }
+} else {
+    $modelsToBuild = @()
+}
+
 
 function ImprimirTiempoTranscurrido {
     param (
@@ -123,8 +138,8 @@ try {
         if (!$skipBuildModels) {
             $pasoActual = "Compilando los módulos DevAx* FamiliaBercomat"
             Write-Information $pasoActual -InformationAction Continue
-            foreach ($module in $modulesToBuild) {
-                Invoke-D365ProcessModule -Module $module -ExecuteCompile
+            foreach ($model in $modelsToBuild) {
+                Invoke-D365ProcessModule -Module $model -ExecuteCompile
             }   
             ImprimirTiempoTranscurrido("Compilación terminada")
         }
