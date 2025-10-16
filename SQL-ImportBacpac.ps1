@@ -43,12 +43,12 @@ if (-not [string]::IsNullOrWhiteSpace($tablesToExclude)) {
     $tablesToExclude = @()
 }
 
-# Parsear modulesToBuild
-if (-not [string]::IsNullOrWhiteSpace($modulesToBuild)) {
-    $modulesToBuild = $modulesToBuild -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
-    Write-Information "Módulos a compilar: $($modulesToBuild -join ', ')" -InformationAction Continue
+# Parsear modelsToBuild
+if (-not [string]::IsNullOrWhiteSpace($modelsToBuild)) {
+    $modelsToBuild = $modelsToBuild -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
+    Write-Information "Modelos a compilar: $($modelsToBuild -join ', ')" -InformationAction Continue
 } else {
-    $modulesToBuild = @()
+    $modelsToBuild = @()
 }
 
 
