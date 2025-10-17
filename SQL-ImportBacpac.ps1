@@ -27,6 +27,9 @@ param (
     [int] $MaxParallelism = 8
 )
 
+$ScriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+Write-Information "Directorio del script: $ScriptDirectory" -InformationAction Continue
+
 # Parsear tablesToClean
 if (-not [string]::IsNullOrWhiteSpace($tablesToClean)) {
     $tablesToClean = $tablesToClean -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
@@ -65,7 +68,13 @@ function ImprimirTiempoTranscurrido {
 }
 
 if (!$skipCheckGitRepoUpdated) {
-    .\CheckGitRepoUpdated.ps1 . # el . representa el directorio actual
+    $checkGitScript = Join-Path $ScriptDirectory "CheckGitRepoUpdated.ps1"
+    if (Test-Path $checkGitScript) {
+        Write-Information "Ejecutando CheckGitRepoUpdated.ps1" -InformationAction Continue
+        & $checkGitScript .
+    } else {
+        Write-Warning "No se encontró CheckGitRepoUpdated.ps1 en $checkGitScript"
+    }
 }
 
 # Guarda la marca de tiempo de inicio
@@ -73,7 +82,16 @@ $inicio = Get-Date
 Write-Information "Inicio: $inicio" -InformationAction Continue
 
 Write-Information "Instalando o actualizando modulo d365fo.tools" -InformationAction Continue
-.\InstallOrUpdateD365foTools.ps1
+$installD365Script = Join-Path $ScriptDirectory "InstallOrUpdateD365foTools.ps1"
+if (Test-Path $installD365Script) {
+    & $installD365Script
+} else {
+    Write-Warning "No se encontró InstallOrUpdateD365foTools.ps1 en $installD365Script"
+    Write-Information "Intentando instalar d365fo.tools directamente..." -InformationAction Continue
+    if (-not (Get-Module -ListAvailable -Name d365fo.tools)) {
+        Install-Module -Name d365fo.tools -Force -AllowClobber -Scope CurrentUser
+    }
+}
 
 Write-Information "Importando modulo d365fo.tools" -InformationAction Continue
 Import-Module -Name d365fo.tools 
@@ -111,7 +129,12 @@ if ($includeInstallSqlPackage) {
 
 # Limpio tablas para agilizar el import
 if (-not $skipCleanTables){
-    .\SQL-CleanBacpac.ps1 -rutaBacpac $rutaBacpac -tables $tablesToClean -excludeTables $tablesToExclude
+    $cleanScript = Join-Path $ScriptDirectory "SQL-CleanBacpac.ps1"
+    if (Test-Path $cleanScript) {
+        & $cleanScript -rutaBacpac $rutaBacpac -tables $tablesToClean -excludeTables $tablesToExclude
+    } else {
+        Write-Warning "No se encontró SQL-CleanBacpac.ps1 en $cleanScript. Saltando limpieza de tablas."
+    }
 }
 
 $ImportedDatabaseName = [System.IO.Path]::GetFileNameWithoutExtension($rutaBacpac)
