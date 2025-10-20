@@ -64,7 +64,7 @@ function ImprimirTiempoTranscurrido {
     $horaActual = Get-Date
     $tiempoTranscurrido = $horaActual - $inicio
     # Imprime las marcas de tiempo y el tiempo transcurrido
-    Write-Information  -ForegroundColor Green "$mensaje, Tiempo transcurrido : $tiempoTranscurrido" -InformationAction Continue
+    Write-Information  "$mensaje, Tiempo transcurrido : $tiempoTranscurrido" -InformationAction Continue
 }
 
 if (!$skipCheckGitRepoUpdated) {
@@ -203,4 +203,4 @@ $fin = Get-Date
 Write-Information  "Inicio: $inicio" -InformationAction Continue
 Write-Information  "Final: $fin" -InformationAction Continue
 $tiempoTranscurrido = $fin - $inicio
-Write-Information  -ForegroundColor Magenta "Tiempo total transcurrido: $tiempoTranscurrido" -InformationAction Continue
+Write-Information  "Tiempo total transcurrido: $tiempoTranscurrido" -InformationAction Continue
