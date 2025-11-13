@@ -4,3 +4,4 @@ Test1.ps1
 bin/
 obj/
 .vs/
+*.json

@@ -11,27 +11,45 @@ Puntos a tener en cuenta para la correcta obtencion de los datos requeridos
 #> 
 
 # Solicitar el ID de la pull request como parámetro obligatorio
+[CmdletBinding()]
 param (
 	[Parameter(Mandatory = $true)]
-	[string]$pullRequestId,	
+	[string]$pullRequestId,
 	#parametro para tipos de impresion,en true para consola y false para ventana GridView
-	[switch]$consolePrint = $true
+	[switch]$consolePrint = $true,
+
+	[Parameter(Mandatory = $false)]
+    [ValidateScript({Test-Path $_ -PathType Leaf})]
+    [string]$ConfigFilePath = (Join-Path $PSScriptRoot "DevOpsAzureREST.config.json")
 )
 
 # Importar configuraciones desde un archivo JSON (incluye PAT)
-$configFile = ".\DevOpsAzureREST.config.json"
-
-if (-not (Test-Path $configFile)) {
-	Write-Error "El archivo de configuración $configFile no existe."
+if (-not (Test-Path $ConfigFilePath)) {
+	Write-Error "El archivo de configuración $ConfigFilePath no existe."
 	exit
 }
 
-$config = Get-Content -Path $configFile | ConvertFrom-Json
+$config = Get-Content -Path $ConfigFilePath | ConvertFrom-Json
 
 # Validar que las claves necesarias estén presentes
 if (-not $config.organization -or -not $config.project -or -not $config.repositoryId -or -not $config.personalAccessToken) {
 	Write-Error "El archivo de configuración debe contener las claves: organization, project, repositoryId, personalAccessToken."
 	exit
+}
+
+# Expand environment variables in PAT if pattern ${env:VAR} exists
+$pat = $config.personalAccessToken
+if ($pat -match '\$\{env:(\w+)\}') {
+	$envVarName = $Matches[1]
+	$envValue = [Environment]::GetEnvironmentVariable($envVarName)
+	if (-not $envValue) {
+		throw "Environment variable '$envVarName' is not defined"
+	}
+	$pat = $envValue
+	Write-Host "PAT loaded from environment variable: $envVarName" -ForegroundColor Green
+}
+else {
+	Write-Warning "PAT detected as plain text in config.json. Consider using environment variables."
 }
 
 # Construir la URL base de la API
@@ -41,7 +59,7 @@ $baseUrl = "https://dev.azure.com/$($config.organization)/$($config.project)/_ap
 $url = "$baseUrl/pullrequests/$pullRequestId/workitems?api-version=7.0"
 
 # Codificar el PAT en Base64
-$base64Auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$($config.personalAccessToken)"))
+$base64Auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$($pat)"))
 
 # Establecer la cabecera de autorización
 $headers = @{

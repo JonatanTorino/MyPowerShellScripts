@@ -1,6 +1,7 @@
 {
+	"__Commnet__": "********** NO EDITAR ESTE ARCHIVO, CREAR UNA COPIA **********",
 	"organization": "[organization]",
 	"project": "[project]",
 	"repositoryId": "[repositoryId]",
-	"personalAccessToken": "[personalAccessToken]"
+    "personalAccessToken": "<token-secreto> PAT plano, o como variable de entorno <env:NombrePAT> "
 }
