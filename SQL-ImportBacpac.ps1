@@ -39,10 +39,11 @@ if (!$skipCheckGitRepoUpdated) {
 $inicio = Get-Date
 Write-Host "Inicio: $inicio"
 
-Write-Host "Instalando o actualizando modulo d365fo.tools"
-.\InstallOrUpdateD365foTools.ps1
+# Write-Host "Instalando o actualizando modulo d365fo.tools"
+. "$PSScriptRoot\InstallOrUpdateD365foTools.ps1"
 
 Write-Host "Importando modulo d365fo.tools"
+Import-Module -Name d365fo.tools
 Import-Module -Name d365fo.tools
 
 # TODO Descartar este bloque para descargar. Luego implementaremos AzCopy
@@ -77,7 +78,7 @@ if ($includeInstallSqlPackage) {
 }
 
 # Limpio tablas para agilizar el import
-.\CleanBacpac.ps1 -rutaBacpac $rutaBacpac
+. "$PSScriptRoot\SQL-CleanBacpac.ps1" -rutaBacpac $rutaBacpac
 $ImportedDatabaseName = [System.IO.Path]::GetFileNameWithoutExtension($rutaBacpac)
 
 try {
