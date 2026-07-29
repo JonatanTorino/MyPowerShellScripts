@@ -59,6 +59,14 @@
     - La verificación de existencia del .bacpac se movió al principio. Antes se hacía
       recién después de instalar módulos y limpiar el archivo, es decir después de
       gastar tiempo en trabajo inútil.
+    - Se verifica que la base importada EXISTA antes de seguir. Resulta que el
+      -ShowOriginalProgress que se agregó para arreglar la falta de visibilidad
+      desactivó, sin querer, la detección de fallos del propio import: d365fo.tools
+      condiciona su chequeo del código de salida a "-not $ShowOriginalProgress", así
+      que una importación fallida seguía de largo hasta el switch. Ahora, después de
+      Import-D365Bacpac, se consulta Get-D365Database y si la base no está se registra
+      el error y se sale con "exit 1" sin tocar el entorno destino. Se verifica el
+      EFECTO, no el código de salida (ver el comentario en la fase 'Importar bacpac').
     - CheckGitRepoUpdated.ps1 se invoca por $PSScriptRoot y no con la ruta relativa
       ".\", que solo resolvía si el directorio actual coincidía con el del script (en
       el agente no coincide). Además ese script hace Set-Location, así que acá se
@@ -78,7 +86,9 @@
       -ShowOriginalProgress, d365fo.tools saltea su propio chequeo del código de salida
       (ver el comentario en la fase 'Compilar modelos'). Era igual antes de este cambio.
       Para verificar el resultado real hay que mirar los logs de xppc, cuyas rutas se
-      imprimen al final de la fase.
+      imprimen al final de la fase. A diferencia del import, acá no hay efecto barato
+      que verificar (los assemblies ya existen de antes); queda un TODO en el código
+      con el enfoque concreto: parsear el XML que xppc deja en XmlLogFile.
     - Se eliminaron los modelos hardcodeados ('DevAx*' y 'FamiliaBercomat') y todo
       fallback a ellos. Este script tiene que servir en cualquier proyecto, y cada
       cliente tiene su propia convención de nombres o directamente ninguna. No hay
@@ -345,6 +355,37 @@ try {
         -NewDatabaseName $ImportedDatabaseName `
         -MaxParallelism $MaxParallelism `
         -ShowOriginalProgress
+
+    # NO BORRAR ESTA VERIFICACIÓN AUNQUE PAREZCA REDUNDANTE.
+    # Import-D365Bacpac NO lanza excepción cuando SqlPackage falla, y justamente por el
+    # -ShowOriginalProgress de arriba. La cadena es:
+    #   Import-D365Bacpac (línea 333) pasa -ShowOriginalProgress a Invoke-SqlPackage,
+    #   que se lo pasa a Invoke-Process (línea 224), y ahí el chequeo del código de
+    #   salida está escrito como:
+    #       if ($p.ExitCode -ne 0 -and (-not $ShowOriginalProgress))
+    #   o sea que con -ShowOriginalProgress el ExitCode NUNCA se evalúa. Además, en ese
+    #   modo Invoke-Process tampoco devuelve el objeto {stdout;stderr;ExitCode}, así que
+    #   no queda ni siquiera un valor de retorno para inspeccionar.
+    # Resultado: una importación fallida seguiría de largo hasta el switch y se llevaría
+    # puesto el entorno destino. Sacar -ShowOriginalProgress no es opción: la visibilidad
+    # de una fase de 2-3 horas es un requisito. Por eso se verifica el EFECTO en vez del
+    # código de salida: si la base existe, SqlPackage hizo su trabajo.
+    # Mismo criterio que Invoke-CHE-DbSync.ps1 en FO.DevTools, que valida la forma del
+    # objeto devuelto en vez de confiar en el silencio. Allá alcanza con el objeto porque
+    # ese script NO usa -ShowOriginalProgress; acá, como sí se usa, el único testigo
+    # confiable es la base de datos misma.
+    $baseImportada = @(Get-D365Database -Name $ImportedDatabaseName)
+    if ($baseImportada.Count -eq 0) {
+        # Falla cerrada a propósito: si Get-D365Database no pudo consultar el servidor
+        # tampoco devuelve nada, y frenar acá es siempre más seguro que seguir al switch.
+        Complete-Phase -Status Failed
+        Write-PipelineError -Message "La importación del bacpac falló: la base de datos '$ImportedDatabaseName' no existe en el servidor después de ejecutar Import-D365Bacpac. SqlPackage puede haber fallado en silencio, porque -ShowOriginalProgress hace que d365fo.tools NO evalúe su código de salida. Revisá el log de SqlPackage más arriba para ver el error real. NO se tocó nada del entorno destino: no hubo switch, ni compilación, ni DB sync."
+
+        # 'exit' dentro del try es control de flujo, no una excepción: el catch NO lo
+        # intercepta y el finally SÍ corre, así que el resumen de fases sale igual.
+        exit 1
+    }
+    Write-Host "Verificación OK: la base '$ImportedDatabaseName' existe en el servidor."
     Complete-Phase
 
     # -------------------------------------------------------------------------
@@ -472,6 +513,15 @@ try {
             # Invoke-D365ProcessModule anterior. Por eso se imprimen abajo las rutas de
             # los logs de xppc: son el único lugar donde queda constancia del resultado
             # real de cada módulo.
+            #
+            # A diferencia de la fase 'Importar bacpac', acá NO se puede verificar el
+            # efecto barato: los assemblies ya existen de la compilación anterior, así
+            # que su presencia no prueba nada, y comparar LastWriteTime por módulo es
+            # frágil (un módulo sin cambios puede no reescribirse).
+            # TODO: hacer fallar la fase leyendo el XML que xppc deja en
+            # $resultado.XmlLogFile. Es la señal confiable: contiene los diagnósticos
+            # con su severidad, así que alcanza con parsearlo y cortar si aparece algún
+            # nodo de error. Se deja pendiente para no ampliar el alcance de este cambio.
             $resultadosCompilacion = @($modulosACompilar | Invoke-D365ModuleCompile -ShowOriginalProgress)
 
             # Se consumen los objetos que devuelve el cmdlet en vez de dejarlos caer al
