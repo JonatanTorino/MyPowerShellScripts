@@ -4,16 +4,18 @@
     ejecuta Azure DevOps. Se consume con dot-sourcing, no como módulo.
 
 .DESCRIPTION
-    Provee cuatro funciones (Start-Phase, Complete-Phase, Write-PhaseSummary y
-    Write-PipelineError) que instrumentan un script largo dividiéndolo en fases
-    visibles y medibles, y que al final imprimen una tabla de resumen
-    Fase | Duración | Estado.
+    Provee cinco funciones (Start-Phase, Complete-Phase, Write-PhaseSummary,
+    Write-PipelineError y Write-PipelineWarning) que instrumentan un script largo
+    dividiéndolo en fases visibles y medibles, y que al final imprimen una tabla de
+    resumen Fase | Duración | Estado.
 
     En un agente de Azure DevOps emite los comandos de logging oficiales:
       - "##[group]" / "##[endgroup]" crean una sección colapsable en el log del run,
         de modo que una corrida de varias horas deja de ser un muro de texto plano.
       - "##vso[task.logissue type=error]" registra el error como issue del run, que es
         lo que hace que el step aparezca en rojo en el resumen del build.
+      - "##vso[task.logissue type=warning]" registra una advertencia como issue del
+        run: queda visible en el resumen del build sin hacerlo fallar.
 
     DEGRADACIÓN FUERA DE AZURE DEVOPS (2026-07-29):
     Los comandos "##[...]" solo los interpreta el agente. Si la variable de entorno
@@ -294,6 +296,50 @@ function Write-PipelineError {
     }
     else {
         Write-Host "ERROR: $mensajePlano" -ForegroundColor Red
+    }
+}
+
+function Write-PipelineWarning {
+    <#
+    .SYNOPSIS
+        Registra una advertencia de forma que Azure DevOps la reconozca como tal.
+
+    .DESCRIPTION
+        Emite "##vso[task.logissue type=warning]<mensaje>", que agrega la advertencia
+        al resumen del run además de imprimirla en el log. Fuera del agente cae a
+        Write-Host en amarillo.
+
+        A diferencia de Write-PipelineError, está pensada para condiciones que el
+        operador tiene que ver pero que NO justifican cortar la ejecución: por ejemplo
+        avisar en el minuto 1 de que la corrida se va a detener más adelante, para que
+        pueda cancelarla en vez de descubrirlo tres horas después.
+
+        No usa Write-Warning a propósito: ese cmdlet escribe en el stream de warnings,
+        que el agente no convierte en issue del run, así que la advertencia no
+        aparecería en el resumen del build.
+
+    .PARAMETER Message
+        Texto de la advertencia. Debe ir en una sola línea: el agente corta el comando
+        en el primer salto de línea, así que un mensaje multilínea se trunca.
+
+    .EXAMPLE
+        Write-PipelineWarning -Message 'No se encontró ningún módulo para compilar.'
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Message
+    )
+
+    # Los saltos de línea cortarían el comando de logging: se aplanan a un solo renglón.
+    $mensajePlano = ($Message -replace '\r?\n', ' ').Trim()
+
+    if (Test-EsAgenteAzureDevOps) {
+        Write-Host "##vso[task.logissue type=warning]$mensajePlano"
+    }
+    else {
+        Write-Host "ADVERTENCIA: $mensajePlano" -ForegroundColor Yellow
     }
 }
 

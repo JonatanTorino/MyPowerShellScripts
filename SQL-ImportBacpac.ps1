@@ -13,6 +13,28 @@
     Limpiar bacpac, Importar bacpac, Detener servicios, Switch de base,
     Compilar modelos, Iniciar servicios, Sincronizar DB.
 
+    EL ORDEN DE LAS ÚLTIMAS FASES ES DELIBERADO:
+    Detener servicios -> Switch de base -> Compilar modelos -> Iniciar servicios ->
+    Sincronizar DB. NO reordenar. El switch va primero porque es lo que deja la base
+    importada en su lugar; la compilación va después para garantizar que no quede
+    ningún cambio de metadata sin reflejar en los binarios; y recién entonces el DB
+    sync concilia la estructura de la base con la versión de los modelos instalados,
+    que es lo que deja el entorno destino operativo. Compilar antes del switch dejaría
+    binarios construidos contra la base vieja, y sincronizar antes de compilar
+    aplicaría a la base una estructura que los binarios todavía no conocen.
+
+    ESCENARIOS DE MIGRACIÓN QUE CUBRE ESTE ORDEN:
+    - Modelos coincidentes entre origen y destino: la estructura no cambia y el DB
+      sync no tiene nada que reconciliar.
+    - Origen con MÁS modelos que el destino: la base importada trae tablas y campos de
+      modelos que el destino no tiene instalados. Esos objetos quedan en la base pero
+      sin código que los use; no rompen la operación.
+    - Mismos modelos en versiones distintas: la compilación deja los binarios en la
+      versión del destino y el DB sync ajusta la estructura de la base a esa versión.
+    - Origen con MENOS modelos que el destino: la base importada llega sin los datos de
+      esos modelos, cosa que se acepta al correr el pipeline, y el DB sync vuelve a
+      crear las estructuras faltantes para que la aplicación siga operable.
+
     CAMBIOS (2026-07-29):
     - EL SCRIPT AHORA FALLA DE VERDAD. Antes el catch imprimía el error en rojo y la
       ejecución continuaba hasta terminar con código 0, de modo que el pipeline daba
@@ -45,6 +67,40 @@
       Dot-sourceado compartía el alcance y reiniciaba el estado de fases del helper de
       logging, además de anidar un "##[group]" dentro de otro, que Azure DevOps no
       soporta. Su código de salida se evalúa por $LASTEXITCODE.
+    - La compilación dejó de usar "Invoke-D365ProcessModule -Module X -ExecuteCompile".
+      Ese modificador llama por dentro a Invoke-D365ModuleFullCompile, que ejecuta TRES
+      herramientas: xppc.exe (código fuente), labelc.exe (labels) y reportsc.exe
+      (reportes). En una migración de base solo hacen falta los binarios, así que
+      labels y reportes eran trabajo desperdiciado. Ahora se resuelve la lista de
+      módulos con Get-D365Module y se la manda por pipe a Invoke-D365ModuleCompile, que
+      corre únicamente xppc.exe y produce los assemblies y los PDB.
+      OJO: la fase de compilación NO falla el step si xppc.exe devuelve error. Con
+      -ShowOriginalProgress, d365fo.tools saltea su propio chequeo del código de salida
+      (ver el comentario en la fase 'Compilar modelos'). Era igual antes de este cambio.
+      Para verificar el resultado real hay que mirar los logs de xppc, cuyas rutas se
+      imprimen al final de la fase.
+    - Se eliminaron los modelos hardcodeados ('DevAx*' y 'FamiliaBercomat') y todo
+      fallback a ellos. Este script tiene que servir en cualquier proyecto, y cada
+      cliente tiene su propia convención de nombres o directamente ninguna. No hay
+      patrón por defecto y NUNCA se cae silenciosamente a '*'.
+    - Los módulos se cuentan ANTES de compilar y se listan en el log. Un conjunto vacío
+      no se compila en silencio: se registra una advertencia y la fase queda 'Skipped'.
+
+    AVISO TEMPRANO Y ABORTO TARDÍO POR -modelsToBuild VACÍO:
+    La importación del bacpac es el objetivo primario, es cara (2-3 horas) pero NO es
+    destructiva: la base aterriza en una base paralela. El switch SÍ es destructivo.
+    De ahí el tratamiento asimétrico cuando se pidió compilar y -modelsToBuild llegó
+    vacío:
+    1. Al principio de todo, antes de cualquier trabajo largo, se emite una ADVERTENCIA
+       ("##vso[task.logissue type=warning]") avisando que la importación va a correr
+       pero que el proceso se va a detener antes del switch. NO se aborta: el operador
+       ve el problema en el minuto 1 en vez de descubrirlo después de tres horas, y
+       puede cancelar la corrida si quiere.
+    2. Al terminar la importación, si la condición sigue vigente, se registra un ERROR,
+       se imprime el resumen de fases y se sale con "exit 1" ANTES de detener
+       servicios, hacer el switch, compilar o sincronizar. El entorno destino queda
+       operativamente intacto y la base importada queda en su lugar, lista para que
+       alguien termine el trabajo a mano.
 
     SEMÁNTICA QUE SE MANTIENE A PROPÓSITO:
     La compilación de modelos está anidada dentro de -includeSwitch. Es decir: sin
@@ -99,9 +155,16 @@
     vacía, ese script usa su lista de exclusión por defecto.
 
 .PARAMETER modelsToBuild
-    Lista separada por comas de modelos a compilar, uno por invocación de
-    Invoke-D365ProcessModule. Admite comodines. Si se omite o llega vacía se compilan
-    los dos modelos históricos: 'DevAx*' y 'FamiliaBercomat'.
+    Lista separada por comas de patrones de búsqueda de módulos a compilar. Admite
+    comodines: cada entrada del CSV se usa tal cual como -Name de Get-D365Module, los
+    resultados de todos los patrones se acumulan y se deduplican por nombre de módulo,
+    y el conjunto entero se manda por pipe a Invoke-D365ModuleCompile. Sirve tanto
+    'Axxon 365*' como 'Axxon 365*,DevAx*'.
+
+    NO tiene valor por defecto y no se cae a ninguna lista histórica ni al comodín '*'.
+    Si se pidió compilar (-includeSwitch sin -skipBuildModels) y este parámetro llega
+    vacío, el script avisa al principio y se detiene después de la importación, antes
+    del switch (ver DESCRIPTION).
 
 .PARAMETER MaxParallelism
     Grado de paralelismo que recibe Import-D365Bacpac. Por defecto 8.
@@ -112,10 +175,19 @@
     Importa el bacpac dejando la base intermedia al costado, sin tocar la AxDB activa.
 
 .EXAMPLE
-    .\SQL-ImportBacpac.ps1 -rutaBacpac 'C:\Temp\AxDB_Backup.bacpac' -includeSwitch
+    .\SQL-ImportBacpac.ps1 -rutaBacpac 'C:\Temp\AxDB_Backup.bacpac' `
+                           -includeSwitch `
+                           -modelsToBuild 'Axxon 365*'
 
-    Importa y pone la base en producción: switch, compilación de 'DevAx*' y
-    'FamiliaBercomat', arranque de servicios y DB sync.
+    Importa y pone la base en producción: switch, compilación de todos los módulos no
+    binarios que empiecen con 'Axxon 365', arranque de servicios y DB sync.
+
+.EXAMPLE
+    .\SQL-ImportBacpac.ps1 -rutaBacpac 'C:\Temp\AxDB_Backup.bacpac' -includeSwitch -skipBuildModels
+
+    Importa y pone la base en producción sin compilar. Es la forma correcta de saltear
+    la compilación: omitir -modelsToBuild NO equivale a esto, detiene el proceso antes
+    del switch (ver DESCRIPTION).
 
 .EXAMPLE
     .\SQL-ImportBacpac.ps1 -rutaBacpac "$(BacpacFullPath)" `
@@ -123,7 +195,7 @@
                            -skipCheckGitRepoUpdated `
                            -tablesToClean 'DOCUHISTORY,BATCHJOBHISTORY,*Staging' `
                            -tablesToExclude 'dbo.AXXTAXFILEPARAMETERS' `
-                           -modelsToBuild 'DevAx*,FamiliaBercomat'
+                           -modelsToBuild 'Axxon 365*,DevAx*'
 
     Forma en la que lo invoca el pipeline Migrate-DB: listas en CSV, provenientes del
     JSON de configuración.
@@ -157,10 +229,6 @@ $ErrorActionPreference = 'Stop'
 
 . "$PSScriptRoot\PipelineLogging.ps1"
 
-# Modelos que se compilaban hardcodeados antes de existir -modelsToBuild. Se conservan
-# como valor por defecto para no cambiar el comportamiento de las corridas existentes.
-[string[]]$modelosPorDefecto = @('DevAx*', 'FamiliaBercomat')
-
 $inicio = Get-Date
 $huboError = $false
 $pasoActual = 'Validación inicial'
@@ -177,6 +245,20 @@ try {
 
     $ImportedDatabaseName = [System.IO.Path]::GetFileNameWithoutExtension($rutaBacpac)
     Write-Host "Base de datos a crear: $ImportedDatabaseName"
+
+    # -------------------------------------------------------------------------
+    # Aviso temprano por -modelsToBuild vacío (ver DESCRIPTION). Se evalúa acá, antes
+    # de cualquier trabajo largo, y se vuelve a evaluar después de la importación para
+    # abortar. La compilación cuelga de -includeSwitch, así que "se pidió compilar" son
+    # las tres condiciones juntas.
+    $seVaACompilar = $includeSwitch -and (-not $skipBuildModels)
+    $faltaModelsToBuild = $seVaACompilar -and ((ConvertTo-ListaDesdeCsv -Csv $modelsToBuild).Count -eq 0)
+
+    if ($faltaModelsToBuild) {
+        # Advertencia, NO error: la importación igual vale la pena y no es destructiva.
+        # El operador decide si cancela ahora o si deja que importe y termina a mano.
+        Write-PipelineWarning -Message "Se pidió compilar modelos (-includeSwitch sin -skipBuildModels) pero -modelsToBuild llegó vacío, y este script no tiene lista de modelos por defecto. La importación del bacpac SE VA A EJECUTAR igual, pero el proceso SE VA A DETENER ANTES DEL SWITCH de base. Si no querés esperar las horas que tarda la importación, cancelá esta corrida ahora y volvé a lanzarla con -modelsToBuild cargado, o con -skipBuildModels si de verdad no hay que compilar."
+    }
 
     # -------------------------------------------------------------------------
     $pasoActual = 'Verificar repo'
@@ -266,6 +348,27 @@ try {
     Complete-Phase
 
     # -------------------------------------------------------------------------
+    # Aborto tardío (ver DESCRIPTION). Se corta acá y no antes porque la importación es
+    # el objetivo primario y NO es destructiva: la base quedó al costado, en paralelo.
+    # Todo lo que sigue SÍ toca el entorno en uso, así que sin lista de modelos se
+    # frena antes de empezar a romper nada.
+    if ($faltaModelsToBuild) {
+        Write-PipelineError -Message "Proceso detenido a propósito antes del switch de base: se pidió compilar pero -modelsToBuild llegó vacío y este script no tiene lista de modelos por defecto. LO QUE SÍ SE HIZO: el bacpac se importó completo y quedó en la base de datos '$ImportedDatabaseName'. LO QUE NO SE HIZO: detener servicios, switch de base, compilar modelos, iniciar servicios y sincronizar la base. ESTADO DEL ENTORNO: intacto y operativo; la AxDB en uso no se tocó y los servicios siguen arriba. PARA TERMINARLO A MANO hace falta, en este orden: switch de base, compilación de modelos y DB sync. Alternativa: volver a lanzar el pipeline con -modelsToBuild cargado."
+
+        # 'exit' dentro del try es control de flujo, no una excepción: el catch NO lo
+        # intercepta (así que no se reporta como fase fallida) pero el finally SÍ se
+        # ejecuta, de modo que el resumen de fases y los tiempos salen igual.
+        exit 1
+    }
+
+    # -------------------------------------------------------------------------
+    # ORDEN DELIBERADO DE ACÁ EN ADELANTE, NO REORDENAR (ver DESCRIPTION):
+    # Detener servicios -> Switch de base -> Compilar modelos -> Iniciar servicios ->
+    # Sincronizar DB. El switch deja la base importada en su lugar, la compilación
+    # garantiza que no quede metadata sin reflejar en los binarios, y el DB sync
+    # concilia la estructura de la base con la versión de los modelos instalados, que
+    # es lo que finalmente deja el entorno destino operativo.
+    #
     # Todo lo que sigue depende de -includeSwitch (ver DESCRIPTION). Sin ese
     # modificador las cinco fases restantes se registran como salteadas.
     $pasoActual = 'Detener servicios'
@@ -302,19 +405,82 @@ try {
     $pasoActual = 'Compilar modelos'
     Start-Phase -Name $pasoActual
     if ($includeSwitch -and -not $skipBuildModels) {
-        # Cadena vacía = no especificado = se compilan los modelos históricos.
-        $modelosACompilar = ConvertTo-ListaDesdeCsv -Csv $modelsToBuild
-        if ($modelosACompilar.Count -eq 0) {
-            $modelosACompilar = $modelosPorDefecto
-            Write-Host 'No se recibió -modelsToBuild; se usa la lista de modelos por defecto.'
+        # Cada entrada del CSV es un patrón de búsqueda independiente. Llegar acá con la
+        # lista vacía es imposible: el aborto tardío de más arriba ya cortó la corrida.
+        $patronesDeModelos = ConvertTo-ListaDesdeCsv -Csv $modelsToBuild
+        Write-Host "Patrones de búsqueda recibidos: $($patronesDeModelos -join ', ')"
+
+        # CUIDADO CON Get-D365Module: el valor por defecto de -Name es '*', o sea TODOS
+        # los módulos instalados, incluidos los de Microsoft. Compilar eso son horas de
+        # trabajo inútil. Por eso -Name siempre se pasa explícito y nunca se deja que
+        # aplique el default.
+        #
+        # -ExcludeBinaryModules descarta los módulos desplegados como binarios, que no
+        # tienen código fuente para compilar. En este entorno conviven módulos binarios
+        # y módulos con fuentes abiertas (WIP), así que este filtro puede devolver cero
+        # resultados de forma perfectamente legítima.
+        #
+        # -InDependencyOrder devuelve los módulos empezando por los que no referencian
+        # a ningún otro, que es el orden en el que hay que compilarlos.
+        $modulosACompilar = @()
+        foreach ($patron in $patronesDeModelos) {
+            $encontrados = @(Get-D365Module -Name $patron -ExcludeBinaryModules -InDependencyOrder)
+            Write-Host "  Patrón '$patron': $($encontrados.Count) módulo(s)."
+
+            foreach ($modulo in $encontrados) {
+                # Un mismo módulo puede coincidir con más de un patrón; se compila una
+                # sola vez. -notcontains es case-insensitive, que es lo correcto para
+                # nombres de módulo.
+                if ($modulosACompilar.ModuleName -notcontains $modulo.ModuleName) {
+                    $modulosACompilar += $modulo
+                }
+            }
         }
 
-        Write-Host "Modelos a compilar: $($modelosACompilar -join ', ')"
-        foreach ($modelo in $modelosACompilar) {
-            Write-Host "Compilando '$modelo'"
-            Invoke-D365ProcessModule -Module $modelo -ExecuteCompile
+        # Se cuenta ANTES de compilar. Un conjunto vacío no es necesariamente un error
+        # (puede ser que todos los módulos del patrón estén desplegados como binarios),
+        # pero compilar nada en silencio SÍ lo sería: el log quedaría igual al de una
+        # compilación exitosa y nadie se enteraría.
+        if ($modulosACompilar.Count -eq 0) {
+            Write-PipelineWarning -Message "No se encontró ningún módulo para compilar con los patrones '$($patronesDeModelos -join ', ')'. Puede ser correcto si todos esos módulos están desplegados como binarios, porque -ExcludeBinaryModules los descarta por no tener código fuente. Verificá igual que el patrón sea el correcto para este proyecto. No se compiló nada."
+            Complete-Phase -Status Skipped
         }
-        Complete-Phase
+        else {
+            Write-Host "Módulos a compilar ($($modulosACompilar.Count), en orden de dependencias): $($modulosACompilar.ModuleName -join ', ')"
+
+            # Invoke-D365ModuleCompile corre SOLO xppc.exe: código fuente -> assemblies
+            # + PDB, que es lo único que hace falta en una migración de base. El anterior
+            # 'Invoke-D365ProcessModule -ExecuteCompile' llamaba por dentro a
+            # Invoke-D365ModuleFullCompile, que además ejecuta labelc.exe (labels) y
+            # reportsc.exe (reportes): trabajo desperdiciado en este contexto.
+            #
+            # NO AGREGAR -XRefGenerationOnly. El ejemplo 5 de la documentación oficial
+            # de Invoke-D365ModuleCompile lo incluye y es tentador "completar" el ejemplo,
+            # pero ese modificador hace que el compilador SOLO genere metadata de XRef y
+            # NO actualice los assemblies ni los PDB, o sea exactamente lo contrario de
+            # lo que se busca acá.
+            #
+            # El pipe funciona porque -Module se enlaza por nombre de propiedad
+            # (ValueFromPipelineByPropertyName) y Get-D365Module emite objetos con la
+            # propiedad Module.
+            #
+            # LIMITACIÓN CONOCIDA, IMPORTANTE: con -ShowOriginalProgress, d365fo.tools
+            # NO evalúa el código de salida de xppc.exe. Su helper interno Invoke-Process
+            # condiciona ese chequeo a "-not $ShowOriginalProgress", así que en este modo
+            # una compilación que falla NO lanza excepción y NO hace fallar el step. Es
+            # el precio de ver el progreso en vivo en una fase larga, y era igual con el
+            # Invoke-D365ProcessModule anterior. Por eso se imprimen abajo las rutas de
+            # los logs de xppc: son el único lugar donde queda constancia del resultado
+            # real de cada módulo.
+            $resultadosCompilacion = @($modulosACompilar | Invoke-D365ModuleCompile -ShowOriginalProgress)
+
+            # Se consumen los objetos que devuelve el cmdlet en vez de dejarlos caer al
+            # stream de salida del script, y se muestran como texto.
+            foreach ($resultado in $resultadosCompilacion) {
+                Write-Host "  Log de compilación: $($resultado.LogFile)"
+            }
+            Complete-Phase
+        }
     }
     else {
         if (-not $includeSwitch) {
