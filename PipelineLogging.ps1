@@ -4,10 +4,12 @@
     ejecuta Azure DevOps. Se consume con dot-sourcing, no como módulo.
 
 .DESCRIPTION
-    Provee cinco funciones (Start-Phase, Complete-Phase, Write-PhaseSummary,
-    Write-PipelineError y Write-PipelineWarning) que instrumentan un script largo
-    dividiéndolo en fases visibles y medibles, y que al final imprimen una tabla de
-    resumen Fase | Duración | Estado.
+    Provee las funciones Start-Phase, Complete-Phase y Write-PhaseSummary, que
+    instrumentan un script largo dividiéndolo en fases visibles y medibles y al final
+    imprimen una tabla de resumen Fase | Duración | Estado; Write-PipelineError y
+    Write-PipelineWarning, que registran issues del run; y ConvertTo-ListaDesdeCsv,
+    que convierte los parámetros CSV que usan los scripts de migración en un arreglo
+    de strings sin entradas vacías.
 
     En un agente de Azure DevOps emite los comandos de logging oficiales:
       - "##[group]" / "##[endgroup]" crean una sección colapsable en el log del run,
@@ -17,7 +19,7 @@
       - "##vso[task.logissue type=warning]" registra una advertencia como issue del
         run: queda visible en el resumen del build sin hacerlo fallar.
 
-    DEGRADACIÓN FUERA DE AZURE DEVOPS (2026-07-29):
+    DEGRADACIÓN FUERA DE AZURE DEVOPS:
     Los comandos "##[...]" solo los interpreta el agente. Si la variable de entorno
     TF_BUILD no está definida (ejecución manual desde una consola del servidor), se
     emiten encabezados de texto plano en su lugar, para que los mismos scripts sigan

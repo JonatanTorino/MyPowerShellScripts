@@ -13,6 +13,10 @@
     Limpiar bacpac, Importar bacpac, Detener servicios, Switch de base,
     Compilar modelos, Iniciar servicios, Sincronizar DB.
 
+    Sin -includeSwitch el script se detiene después de importar: la base queda al
+    costado, en paralelo, y el entorno en uso no se toca. Con -includeSwitch se
+    ejecutan además las cinco fases finales, que sí modifican el entorno.
+
     EL ORDEN DE LAS ÚLTIMAS FASES ES DELIBERADO:
     Detener servicios -> Switch de base -> Compilar modelos -> Iniciar servicios ->
     Sincronizar DB. NO reordenar. El switch va primero porque es lo que deja la base
@@ -35,72 +39,15 @@
       esos modelos, cosa que se acepta al correr el pipeline, y el DB sync vuelve a
       crear las estructuras faltantes para que la aplicación siga operable.
 
-    CAMBIOS (2026-07-29):
-    - EL SCRIPT AHORA FALLA DE VERDAD. Antes el catch imprimía el error en rojo y la
-      ejecución continuaba hasta terminar con código 0, de modo que el pipeline daba
-      verde aunque la base no se hubiera importado. Ahora el error se registra con
-      "##vso[task.logissue type=error]" y el script termina con "exit 1".
-    - Se corrigió la interpolación del mensaje de error. Estaba escrito como
-      "$_.Exception.Message" dentro de comillas dobles: PowerShell interpola solo $_ y
-      concatena el texto literal ".Exception.Message", así que el error real nunca se
-      imprimía. Ahora usa $($_.Exception.Message).
-    - Se agregó -ShowOriginalProgress a Import-D365Bacpac. Es la operación más larga de
-      todo el pipeline (horas) y sin ese modificador la consola queda muda mientras
-      corre. SQL-ExportBacpac.ps1 ya lo usaba en New-D365Bacpac.
-    - Se agregaron -skipCleanTables, -tablesToClean, -tablesToExclude y -modelsToBuild
-      para que el pipeline configure el comportamiento desde su JSON. Los tres últimos
-      son [string] separados por comas, NO [string[]]: el pipeline pasa CSV para
-      esquivar los problemas de comillas de YAML, y el split se hace adentro del
-      script. Cadena vacía significa "no especificado" y cae al comportamiento previo.
-    - Se eliminó código muerto: el parámetro -urlDescargarBacpac junto con su bloque de
-      descarga (evaluaba $urlDescarga, una variable que nunca se declaraba, por lo que
-      era inalcanzable), el parámetro -reinstallCsu con su bloque enteramente comentado
-      y marcado "TODO Falta implementar", y un Import-Module de d365fo.tools duplicado.
-    - La verificación de existencia del .bacpac se movió al principio. Antes se hacía
-      recién después de instalar módulos y limpiar el archivo, es decir después de
-      gastar tiempo en trabajo inútil.
-    - Se verifica que la base importada EXISTA antes de seguir. Resulta que el
-      -ShowOriginalProgress que se agregó para arreglar la falta de visibilidad
-      desactivó, sin querer, la detección de fallos del propio import: d365fo.tools
-      condiciona su chequeo del código de salida a "-not $ShowOriginalProgress", así
-      que una importación fallida seguía de largo hasta el switch. Ahora, después de
-      Import-D365Bacpac, se consulta Get-D365Database y si la base no está se registra
-      el error y se sale con "exit 1" sin tocar el entorno destino. Se verifica el
-      EFECTO, no el código de salida (ver el comentario en la fase 'Importar bacpac').
-    - CheckGitRepoUpdated.ps1 se invoca por $PSScriptRoot y no con la ruta relativa
-      ".\", que solo resolvía si el directorio actual coincidía con el del script (en
-      el agente no coincide). Además ese script hace Set-Location, así que acá se
-      guarda y se restaura el directorio actual alrededor de la llamada.
-    - SQL-CleanBacpac.ps1 pasó a invocarse con el operador & en vez de dot-sourcing.
-      Dot-sourceado compartía el alcance y reiniciaba el estado de fases del helper de
-      logging, además de anidar un "##[group]" dentro de otro, que Azure DevOps no
-      soporta. Su código de salida se evalúa por $LASTEXITCODE.
-    - La compilación dejó de usar "Invoke-D365ProcessModule -Module X -ExecuteCompile".
-      Ese modificador llama por dentro a Invoke-D365ModuleFullCompile, que ejecuta TRES
-      herramientas: xppc.exe (código fuente), labelc.exe (labels) y reportsc.exe
-      (reportes). En una migración de base solo hacen falta los binarios, así que
-      labels y reportes eran trabajo desperdiciado. Ahora se resuelve la lista de
-      módulos con Get-D365Module y se la manda por pipe a Invoke-D365ModuleCompile, que
-      corre únicamente xppc.exe y produce los assemblies y los PDB.
-      OJO: la fase de compilación NO falla el step si xppc.exe devuelve error. Con
-      -ShowOriginalProgress, d365fo.tools saltea su propio chequeo del código de salida
-      (ver el comentario en la fase 'Compilar modelos'). Era igual antes de este cambio.
-      Para verificar el resultado real hay que mirar los logs de xppc, cuyas rutas se
-      imprimen al final de la fase. A diferencia del import, acá no hay efecto barato
-      que verificar (los assemblies ya existen de antes); queda un TODO en el código
-      con el enfoque concreto: parsear el XML que xppc deja en XmlLogFile.
-    - Se eliminaron los modelos hardcodeados ('DevAx*' y 'FamiliaBercomat') y todo
-      fallback a ellos. Este script tiene que servir en cualquier proyecto, y cada
-      cliente tiene su propia convención de nombres o directamente ninguna. No hay
-      patrón por defecto y NUNCA se cae silenciosamente a '*'.
-    - Los módulos se cuentan ANTES de compilar y se listan en el log. Un conjunto vacío
-      no se compila en silencio: se registra una advertencia y la fase queda 'Skipped'.
+    LAS FASES FINALES CUELGAN DE -includeSwitch:
+    Detener servicios, Switch de base, Compilar modelos, Iniciar servicios y
+    Sincronizar DB solo se ejecutan con -includeSwitch. En particular, sin ese
+    modificador NO se compila, aunque no se haya pasado -skipBuildModels.
 
-    AVISO TEMPRANO Y ABORTO TARDÍO POR -modelsToBuild VACÍO:
+    QUÉ PASA SI SE PIDIÓ COMPILAR Y -modelsToBuild LLEGA VACÍO:
     La importación del bacpac es el objetivo primario, es cara (2-3 horas) pero NO es
     destructiva: la base aterriza en una base paralela. El switch SÍ es destructivo.
-    De ahí el tratamiento asimétrico cuando se pidió compilar y -modelsToBuild llegó
-    vacío:
+    De ahí el tratamiento asimétrico:
     1. Al principio de todo, antes de cualquier trabajo largo, se emite una ADVERTENCIA
        ("##vso[task.logissue type=warning]") avisando que la importación va a correr
        pero que el proceso se va a detener antes del switch. NO se aborta: el operador
@@ -112,12 +59,11 @@
        operativamente intacto y la base importada queda en su lugar, lista para que
        alguien termine el trabajo a mano.
 
-    SEMÁNTICA QUE SE MANTIENE A PROPÓSITO:
-    La compilación de modelos está anidada dentro de -includeSwitch. Es decir: sin
-    -includeSwitch NO se compila, aunque no se haya pasado -skipBuildModels. Puede
-    parecer un error, pero es el comportamiento histórico y hay corridas que dependen
-    de él, así que se deja tal cual. Lo mismo vale para Detener servicios, Switch de
-    base, Iniciar servicios y Sincronizar DB: todas cuelgan de -includeSwitch.
+    LIMITACIÓN CONOCIDA DE LA FASE 'Compilar modelos':
+    esa fase NO hace fallar el step si xppc.exe devuelve error, porque
+    -ShowOriginalProgress hace que d365fo.tools saltee su propio chequeo del código de
+    salida. Para verificar el resultado real hay que mirar los logs de xppc, cuyas
+    rutas se imprimen al final de la fase.
 
     REQUISITO DE PLATAFORMA:
     Windows PowerShell 5.1 (NO pwsh / PowerShell Core), porque el módulo d365fo.tools
@@ -150,9 +96,8 @@
     corrida y la verificación no aporta nada en ese contexto.
 
 .PARAMETER skipCleanTables
-    Omite la fase de limpieza del .bacpac. Antes esa limpieza era incondicional y no
-    había forma de evitarla cuando el bacpac ya venía limpio o se quería importar
-    completo.
+    Omite la fase de limpieza del .bacpac. Útil cuando el archivo ya viene limpio o
+    cuando se quiere importar la base completa.
 
 .PARAMETER tablesToClean
     Lista separada por comas de tablas a vaciar en el .bacpac; se reenvía tal cual a
@@ -209,6 +154,12 @@
 
     Forma en la que lo invoca el pipeline Migrate-DB: listas en CSV, provenientes del
     JSON de configuración.
+
+.LINK
+    SQL-ExportBacpac.ps1
+
+.LINK
+    SQL-CleanBacpac.ps1
 #>
 [CmdletBinding()]
 param (
@@ -248,7 +199,7 @@ Write-Host "Bacpac: $rutaBacpac"
 
 try {
     # Validación temprana: fallar acá evita instalar módulos y limpiar un archivo que
-    # no existe. Antes esta comprobación estaba después de esos pasos.
+    # no existe.
     if (-not (Test-Path -Path $rutaBacpac -PathType Leaf)) {
         throw [System.IO.FileNotFoundException]::new("No se encontró el archivo .bacpac indicado: $rutaBacpac")
     }

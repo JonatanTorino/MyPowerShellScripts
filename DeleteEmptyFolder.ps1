@@ -1,3 +1,39 @@
+﻿<#
+.SYNOPSIS
+    Borra recursivamente todas las carpetas vacías que cuelgan de una ruta.
+
+.DESCRIPTION
+    Recorre el árbol de abajo hacia arriba, de modo que una carpeta que queda vacía
+    porque se borraron sus subcarpetas también se elimina en la misma pasada.
+
+    Por defecto los archivos ocultos (thumbs.db, desktop.ini y similares) NO cuentan
+    como contenido: una carpeta que solo los tenga se considera vacía y se borra junto
+    con ellos. Con -removeHiddenFiles $false esas carpetas se conservan.
+
+    ES DESTRUCTIVO. Conviene hacer una pasada con -whatIf $true antes de la definitiva.
+
+.PARAMETER folderPath
+    Carpeta raíz a partir de la cual se busca.
+
+.PARAMETER whatIf
+    Con $true solo informa qué carpetas se borrarían, sin borrar nada. Por defecto
+    $false.
+
+.PARAMETER removeHiddenFiles
+    Con $true (valor por defecto) los archivos ocultos no impiden que una carpeta se
+    considere vacía y se borran con ella. Con $false, una carpeta con archivos ocultos
+    se conserva.
+
+.EXAMPLE
+    .\DeleteEmptyFolder.ps1 -folderPath 'D:\Archivo' -whatIf $true
+
+    Simula la limpieza y lista las carpetas que se borrarían.
+
+.EXAMPLE
+    .\DeleteEmptyFolder.ps1 -folderPath 'D:\Archivo'
+
+    Borra las carpetas vacías, incluidas las que solo tienen archivos ocultos.
+#>
 param (
     [Parameter(Mandatory = $true)]
     [string]

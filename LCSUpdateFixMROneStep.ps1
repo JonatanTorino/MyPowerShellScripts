@@ -1,3 +1,31 @@
+﻿<#
+.SYNOPSIS
+    Neutraliza el AutoRunDVT.ps1 del paquete MROneBox para que una actualización de LCS
+    no falle en la validación de Management Reporter.
+
+.DESCRIPTION
+    Busca el paquete deployable más reciente dentro de %SERVICEDRIVE%\DeployablePackages,
+    entra en MROneBox\Scripts\Update y, sobre AutoRunDVT.ps1:
+    1. Guarda una copia como AutoRunDVT_backup.ps1.
+    2. Vacía el archivo original.
+    3. Verifica que haya quedado vacío.
+
+    El DVT de Management Reporter suele frenar la instalación del paquete en entornos
+    de desarrollo donde MR está deshabilitado. Vaciar el script lo convierte en un
+    no-op y deja seguir la actualización.
+
+    Se ejecuta ANTES de aplicar el paquete. Si después hace falta el DVT original, se
+    restaura desde AutoRunDVT_backup.ps1.
+
+    No toma parámetros. Requiere ejecutarse en el servidor del entorno, como
+    administrador.
+
+.EXAMPLE
+    .\LCSUpdateFixMROneStep.ps1
+
+.LINK
+    D365UpdateVersion.ps1
+#>
 
 # 1. Define las rutas para los directorios y el archivo
 $basePath = "$ENV:SERVICEDRIVE\DeployablePackages\"  # Ruta base de las carpetas

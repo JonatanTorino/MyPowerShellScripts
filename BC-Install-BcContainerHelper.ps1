@@ -1,4 +1,26 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
+
+<#
+.SYNOPSIS
+    Prepara la máquina para levantar contenedores de Business Central: instala
+    BcContainerHelper y habilita las características de Windows que hacen falta.
+
+.DESCRIPTION
+    Instala el módulo BcContainerHelper si no está presente y habilita las
+    características 'containers' y 'Microsoft-Hyper-V' si están deshabilitadas. Cada
+    paso es idempotente: si ya está hecho, informa y sigue.
+
+    No toma parámetros. Debe ejecutarse como administrador y puede requerir reinicio,
+    porque las características de Windows se habilitan con -NoRestart.
+
+.EXAMPLE
+    .\BC-Install-BcContainerHelper.ps1
+
+    Deja la máquina lista para crear contenedores con BC-Create-DockerContainer.ps1.
+
+.LINK
+    BC-Create-DockerContainer.ps1
+#>
 
 # Función para comprobar e instalar un módulo
 function Install-ModuleIfNotPresent {

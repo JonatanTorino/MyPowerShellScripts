@@ -1,14 +1,50 @@
-<#COTEJAR INFORMACION
-Puntos a tener en cuenta para la correcta obtencion de los datos requeridos
-1 	
-	Asegurarse que se tenga un PAT (Personal Access Token) con los permisos necesarios y que no este Expirado,
-	chequear desde https://dev.azure.com/[Proyecto]/_usersSettings/tokens.
-	Configurar el PAT con permisos de lectura para: Code y WorkItems
-2 
-	Tener el archivo Json DevOpsAzureREST.config.json en el mismo directorio donde se ejecuta este Script 
-	que es de donde se obtienen las configuraciones para el presente archivo.
-	https://dev.azure.com/[organization]/[project]/_git/[repositoryId]
-#> 
+﻿<#
+.SYNOPSIS
+    Lista los work items vinculados a una pull request de Azure DevOps, con su ID y su
+    título.
+
+.DESCRIPTION
+    Consulta la API REST de Azure DevOps (api-version 7.0) y, por cada work item
+    asociado a la pull request, resuelve su título. El resultado se muestra en la
+    consola o en una ventana Out-GridView.
+
+    La organización, el proyecto, el repositorio y el PAT se leen del archivo JSON
+    indicado en -ConfigFilePath, que por defecto es DevOpsAzureREST.config.json en el
+    mismo directorio que este script. El archivo debe tener las claves organization,
+    project, repositoryId y personalAccessToken.
+
+    EL PAT DEBE VENIR DE UNA VARIABLE DE ENTORNO. Si personalAccessToken tiene la forma
+    "${env:NOMBRE_VARIABLE}", el valor se resuelve desde esa variable de entorno; si se
+    deja el token en texto plano el script funciona igual pero emite una advertencia.
+    El PAT necesita permisos de lectura sobre Code y Work Items, y no debe estar
+    vencido (se administra en https://dev.azure.com/[organizacion]/_usersSettings/tokens).
+
+.PARAMETER pullRequestId
+    ID de la pull request cuyos work items se quieren listar.
+
+.PARAMETER consolePrint
+    Muestra el resultado como tabla en la consola (valor por defecto). Con
+    -consolePrint:$false se abre una ventana Out-GridView.
+
+.PARAMETER ConfigFilePath
+    Ruta del archivo JSON de configuración. Por defecto,
+    DevOpsAzureREST.config.json junto a este script.
+
+.EXAMPLE
+    .\ADO-Get-WorkItems.ps1 -pullRequestId 1234
+
+    Imprime en consola los work items vinculados a la PR 1234.
+
+.EXAMPLE
+    .\ADO-Get-WorkItems.ps1 -pullRequestId 1234 -consolePrint:$false
+
+    Abre los resultados en una cuadrícula interactiva.
+
+.EXAMPLE
+    .\ADO-Get-WorkItems.ps1 -pullRequestId 1234 -ConfigFilePath 'C:\Config\OtroProyecto.json'
+
+    Usa la configuración de otra organización o repositorio.
+#>
 
 # Solicitar el ID de la pull request como parámetro obligatorio
 [CmdletBinding()]

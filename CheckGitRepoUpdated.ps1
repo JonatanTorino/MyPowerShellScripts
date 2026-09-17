@@ -8,14 +8,12 @@
     remoto. Lo usa SQL-ImportBacpac.ps1 antes de una migración, para no correr una
     versión vieja de los scripts.
 
-    CAMBIOS (2026-07-29):
-    - La rama a comparar ya no está hardcodeada como "main". Este repositorio tiene
-      "master" como rama por defecto, así que "origin/main" no existe y la comparación
-      era siempre incorrecta. Ahora se resuelve la rama por defecto del remoto
-      (refs/remotes/origin/HEAD) y se puede forzar con -nombreRama.
-    - Las llamadas nativas a git se ejecutan con ErrorActionPreference en 'Continue'.
-      git escribe su progreso en stderr y, con la preferencia en 'Stop' que fija el
-      script llamador, eso puede convertirse en un error terminante espurio.
+    La rama a comparar no está hardcodeada: se resuelve la rama por defecto del remoto
+    (refs/remotes/origin/HEAD) y se puede forzar con -nombreRama.
+
+    Las llamadas nativas a git corren con ErrorActionPreference en 'Continue', porque
+    git escribe su progreso en stderr y con la preferencia en 'Stop' que fija el script
+    llamador eso puede convertirse en un error terminante espurio.
 
     OJO — EFECTO SECUNDARIO: este script hace Set-Location, es decir muta el directorio
     actual del proceso y no lo restaura. Quien lo invoque debe guardar y restaurar su

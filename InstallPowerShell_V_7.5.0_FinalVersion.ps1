@@ -1,3 +1,39 @@
+﻿<#
+.SYNOPSIS
+    Descarga e instala PowerShell 7.5.0 para Windows desde el release oficial de
+    GitHub.
+
+.DESCRIPTION
+    Descarga el .msi correspondiente a la arquitectura elegida en %TEMP% (si el archivo
+    ya está descargado, lo reutiliza), lo instala con msiexec y borra el instalador al
+    terminar.
+
+    En modo silencioso genera un log con marca de tiempo en %TEMP% y, si la instalación
+    falla, lo recorre buscando las líneas con "Error", "failed" o "fatal" y las imprime,
+    para no tener que abrir el log a mano.
+
+    La versión 7.5.0 está fijada en el script: para instalar otra hay que cambiar la
+    URL y el nombre del archivo en las variables $Url y $Version.
+
+    Requiere ejecutarse como administrador.
+
+.PARAMETER architecture
+    Arquitectura del paquete: "x" para x64 (valor por defecto) o "arm" para arm64.
+
+.PARAMETER silent
+    Con $true (valor por defecto) instala sin interfaz, sin reiniciar y con log. Con
+    $false muestra el asistente del MSI.
+
+.EXAMPLE
+    .\InstallPowerShell_V_7.5.0_FinalVersion.ps1
+
+    Instala PowerShell 7.5.0 x64 en modo silencioso.
+
+.EXAMPLE
+    .\InstallPowerShell_V_7.5.0_FinalVersion.ps1 -architecture 'arm' -silent $false
+
+    Instala la versión arm64 mostrando el asistente.
+#>
 param (
     [string]$architecture = "x",  # Arquitectura por defecto puede ser "arm" la otra opcion
     [bool]$silent = $true                # Opción para instalación silenciosa

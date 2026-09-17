@@ -9,25 +9,23 @@
     corrida. El trabajo se divide en fases visibles en el log del run y termina con una
     tabla Fase | Duración | Estado.
 
-    CAMBIOS (2026-07-29):
-    - EL SCRIPT AHORA FALLA DE VERDAD. Antes el catch imprimía el error en rojo y el
-      script terminaba con código 0, de modo que el pipeline daba verde aunque no se
-      hubiera generado el .bacpac. Ahora el error se registra con
-      "##vso[task.logissue type=error]" y el script termina con "exit 1".
-    - Se publica el nombre exacto del archivo generado como variable de salida:
-      "##vso[task.setvariable variable=ExportedBacpacFile;isOutput=true]". Hasta ahora
-      el pipeline resolvía el .bacpac tomando el más reciente de la carpeta destino, lo
-      que ante un export fallido puede levantar el archivo de una corrida ANTERIOR y
-      migrar una base vieja a todos los entornos mostrando verde. Con la ruta explícita
-      esa adivinanza deja de ser necesaria.
-      NOTA: "isOutput=true" exige que el step de PowerShell tenga un "name:" definido en
-      el YAML; el step que invoca este script ya lo tiene.
-    - Antes de dar el export por exitoso se verifica que el archivo exista Y que su
-      LastWriteTime sea posterior a la marca de inicio de esta corrida. Un archivo
-      preexistente con el mismo nombre ya no puede hacerse pasar por recién generado.
-    - El finally que borra el directorio temporal ya no puede enmascarar un fallo
-      previo: va dentro de su propio try/catch y, si falla, solo emite una advertencia
-      sin alterar el resultado ni el código de salida del script.
+    SALIDA PARA EL PIPELINE:
+    Al terminar bien, publica la ruta completa del archivo generado como variable de
+    salida de Azure DevOps:
+      "##vso[task.setvariable variable=ExportedBacpacFile;isOutput=true]"
+    El pipeline la consume en lugar de adivinar cuál es el .bacpac más reciente de la
+    carpeta destino, adivinanza que ante un export fallido puede levantar el archivo de
+    una corrida ANTERIOR y migrar una base vieja mostrando verde.
+    NOTA: "isOutput=true" exige que el step de PowerShell tenga un "name:" definido en
+    el YAML.
+
+    VERIFICACIÓN Y MANEJO DE ERRORES:
+    El export se da por exitoso solo si el archivo existe Y su LastWriteTime es
+    posterior a la marca de inicio de la corrida, de modo que un archivo preexistente
+    con el mismo nombre no pueda hacerse pasar por recién generado. Ante cualquier
+    fallo el error se registra con "##vso[task.logissue type=error]" y el script
+    termina con "exit 1", así el step queda en rojo. El borrado del directorio
+    temporal nunca enmascara un fallo previo: si falla, solo emite una advertencia.
 
     REQUISITO DE PLATAFORMA:
     Windows PowerShell 5.1 (NO pwsh / PowerShell Core), porque el módulo d365fo.tools

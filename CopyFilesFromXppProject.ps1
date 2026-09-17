@@ -1,3 +1,34 @@
+﻿<#
+.SYNOPSIS
+    Copia a una carpeta destino los archivos XML de los elementos incluidos en un
+    proyecto X++ (.rnrproj).
+
+.DESCRIPTION
+    Lee el .rnrproj, toma el atributo Include de cada nodo Content (que tiene la forma
+    "TipoDeElemento\NombreDelElemento") y copia el .xml correspondiente desde el
+    PackagesLocalDirectory del modelo hacia el destino, respetando la carpeta por tipo
+    de elemento. Las carpetas que faltan en el destino se crean.
+
+    Sirve para armar el juego de metadatos de un proyecto sin exportar el modelo
+    entero. Los elementos que no existan en el modelo se informan como advertencia y
+    se saltean.
+
+.PARAMETER ProjectPath
+    Ruta completa al archivo de proyecto X++ (.rnrproj) a procesar.
+
+.PARAMETER AosModelPath
+    Carpeta del modelo dentro de PackagesLocalDirectory de la que se leen los XML de
+    origen (por ejemplo
+    'K:\AosService\PackagesLocalDirectory\MiModelo\MiModelo').
+
+.PARAMETER DestinationPath
+    Carpeta donde se copian los archivos, agrupados por tipo de elemento.
+
+.EXAMPLE
+    .\CopyFilesFromXppProject.ps1 -ProjectPath 'C:\Repos\MiProy\MiProy.rnrproj' `
+                                  -AosModelPath 'K:\AosService\PackagesLocalDirectory\MiModelo\MiModelo' `
+                                  -DestinationPath 'C:\Temp\Export'
+#>
 param (
     [Parameter(Mandatory=$true)]
     [string]$ProjectPath,

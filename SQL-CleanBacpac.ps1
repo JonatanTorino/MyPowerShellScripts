@@ -10,26 +10,19 @@
     destino y que son las que más pesan.
 
     Se usa de dos maneras: invocado por SQL-ImportBacpac.ps1 como una fase más de la
-    migración, o a mano contra un .bacpac suelto. Por eso las listas de tablas siguen
-    teniendo valores por defecto: sin parámetros se comporta exactamente igual que
-    antes de esta modificación.
+    migración, o a mano contra un .bacpac suelto. Por eso las listas de tablas tienen
+    valores por defecto: sin parámetros hace una limpieza razonable de una AxDB.
 
-    CAMBIOS (2026-07-29):
-    - Se agregaron -tablesToClean y -tablesToExclude para que el pipeline pueda
-      configurar las listas desde su JSON en lugar de tenerlas hardcodeadas acá. Ambos
-      son [string] separados por comas, NO [string[]]: el pipeline pasa CSV para
-      esquivar los problemas de comillas de YAML, y el split se hace adentro del
-      script. Cadena vacía significa "no especificado" y cae a la lista por defecto.
-    - El script pasó a fallar de verdad. Antes cualquier excepción se imprimía y la
-      ejecución seguía, con lo que el pipeline daba verde sobre un bacpac sin limpiar.
-      Ahora usa $ErrorActionPreference='Stop', registra el error con Write-PipelineError
-      y termina con "exit 1".
-    - Se corrigió el conteo de tablas: se usaba $tablesToClear.Length, que no existe
-      cuando Get-D365BacpacTable devuelve un único objeto en vez de un arreglo. Ahora
-      el resultado se envuelve con @() y se cuenta con .Count.
-    - Se agregó -skipPhaseLogging para el caso en que lo invoca SQL-ImportBacpac.ps1,
-      que ya abrió su propia fase "Limpiar bacpac". Azure DevOps no soporta grupos
-      "##[group]" anidados, así que el hijo no debe abrir el suyo.
+    LISTAS EN FORMATO CSV:
+    -tablesToClean y -tablesToExclude son [string] separados por comas, NO [string[]].
+    El pipeline pasa CSV para esquivar los problemas de comillas de YAML y el split se
+    hace adentro del script. Cadena vacía significa "no especificado" y cae a la lista
+    por defecto.
+
+    MANEJO DE ERRORES:
+    Corre con $ErrorActionPreference='Stop'. Ante cualquier fallo registra el error con
+    Write-PipelineError y termina con "exit 1", para que el step del pipeline quede en
+    rojo en vez de dar verde sobre un bacpac sin limpiar.
 
     REQUISITO DE PLATAFORMA:
     Windows PowerShell 5.1 (NO pwsh / PowerShell Core), porque el módulo d365fo.tools

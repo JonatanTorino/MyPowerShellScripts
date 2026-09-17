@@ -1,3 +1,43 @@
+﻿<#
+.SYNOPSIS
+    Recompila los modelos personalizados de un entorno D365FO Tier 1, sincroniza la
+    base, despliega los reportes y reinicia los servicios.
+
+.DESCRIPTION
+    Tiene dos modos:
+    - Sin -OnlyCustom (por defecto): resuelve TODOS los módulos no binarios con modelos
+      personalizables (excluyendo los de Microsoft), los compila en orden de
+      dependencias, corre un DB sync completo y después despliega los reportes de cada
+      modelo.
+    - Con -OnlyCustom: hace una compilación completa (código, labels y reportes) solo
+      del módulo indicado en -ModuleName y sincroniza y despliega reportes modelo por
+      modelo, sin tocar el resto del entorno.
+
+    En ambos casos termina deteniendo el entorno, levantando los servicios de inicio
+    automático, vaciando la caché con Invoke-D365DataFlush e imprimiendo el tiempo
+    total de ejecución.
+
+    Es una operación larga, de decenas de minutos a horas según la cantidad de modelos.
+    Requiere el módulo d365fo.tools y ejecutarse en el servidor del entorno como
+    administrador.
+
+.PARAMETER ModuleName
+    Módulo a compilar. Solo se usa con -OnlyCustom; en el modo completo se ignora.
+
+.PARAMETER OnlyCustom
+    Compila únicamente el módulo indicado en -ModuleName, en lugar de recorrer todos
+    los módulos personalizables del entorno.
+
+.EXAMPLE
+    .\ReCompileCode.ps1
+
+    Recompila todos los modelos personalizables del entorno y sincroniza la base.
+
+.EXAMPLE
+    .\ReCompileCode.ps1 -ModuleName 'MiModulo' -OnlyCustom
+
+    Compila solo MiModulo y sincroniza y despliega reportes de sus modelos.
+#>
 [CmdletBinding()]
 param (
     [string]
