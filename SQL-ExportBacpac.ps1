@@ -27,6 +27,19 @@
     termina con "exit 1", así el step queda en rojo. El borrado del directorio
     temporal nunca enmascara un fallo previo: si falla, solo emite una advertencia.
 
+    LIMPIEZA PREVIA AL EXPORT:
+    New-D365Bacpac -ExportModeTier1 no exporta la base viva: primero le hace un
+    BACKUP ... WITH COPY_ONLY (en caliente, sin cortar el servicio), lo restaura con
+    otro nombre y exporta esa copia, que destruye al terminar. Contra esa copia, y
+    justo antes de que SqlPackage la lea, ejecuta el archivo que reciba en
+    -CustomSqlFile.
+
+    Ese es el único punto donde conviene borrar registros para que la exportación sea
+    más corta: lo que se borre ahí no llega a serializarse. La base de origen nunca se
+    modifica. La limpieza que hace SQL-CleanBacpac.ps1 es distinta y complementaria:
+    reescribe el .bacpac ya generado, con lo que acorta la importación, no la
+    exportación.
+
     REQUISITO DE PLATAFORMA:
     Windows PowerShell 5.1 (NO pwsh / PowerShell Core), porque el módulo d365fo.tools
     requiere 5.1. Por eso el step del pipeline que llama a este script va con
@@ -49,6 +62,15 @@
     Texto opcional que se agrega al nombre del archivo, después de la marca de tiempo.
     Se le quitan los espacios. Sirve para distinguir exports manuales.
 
+.PARAMETER CustomSqlFile
+    Ruta a un archivo .sql que se ejecuta contra la COPIA de trabajo que arma
+    New-D365Bacpac, antes de que SqlPackage la exporte. Sirve para vaciar tablas de log
+    y que no viajen en el .bacpac. Si se omite (valor por defecto: cadena vacía) no se
+    ejecuta ningún SQL adicional y se exporta la base completa.
+
+    La ruta tiene que existir: si se pasa un archivo inexistente el script corta con
+    error en vez de exportar en silencio sin limpiar.
+
 .EXAMPLE
     .\SQL-ExportBacpac.ps1
 
@@ -66,6 +88,20 @@
     .\SQL-ExportBacpac.ps1 -ExtraDescription 'previo a upgrade'
 
     Genera AxDB_Backup-<maquina>-<fecha>_previoaupgrade.bacpac.
+
+.EXAMPLE
+    .\SQL-ExportBacpac.ps1 -CustomSqlFile 'C:\temp\bacpac-cleanup.sql'
+
+    Ejecuta bacpac-cleanup.sql contra la copia de trabajo y recién después exporta, de
+    modo que las tablas que ese SQL vacíe no se serialicen en el .bacpac. Es la forma
+    en que lo invoca el pipeline Migrate-DB-MultiEnv, que genera el .sql a partir de su
+    JSON de configuración.
+
+.LINK
+    SQL-CleanBacpac.ps1
+
+.LINK
+    SQL-ImportBacpac.ps1
 #>
 [CmdletBinding()]
 param (
@@ -79,7 +115,10 @@ param (
     [string]$TargetPath = 'J:\MSSQL_BACKUP',
 
     [Parameter(Mandatory = $false)]
-    [string]$ExtraDescription = ''
+    [string]$ExtraDescription = '',
+
+    [Parameter(Mandatory = $false)]
+    [string]$CustomSqlFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -124,11 +163,31 @@ try {
     # -------------------------------------------------------------------------
     $pasoActual = 'Exportar bacpac'
     Start-Phase -Name $pasoActual
-    New-D365Bacpac -ExportModeTier1 `
-        -BackupDirectory $BackupDirectory `
-        -NewDatabaseName $NewDatabaseName `
-        -BacpacFile $BacpacFile `
-        -ShowOriginalProgress
+    $argumentosBacpac = @{
+        ExportModeTier1      = $true
+        BackupDirectory      = $BackupDirectory
+        NewDatabaseName      = $NewDatabaseName
+        BacpacFile           = $BacpacFile
+        ShowOriginalProgress = $true
+    }
+
+    # Se agrega por splatting y solo si vino con valor: New-D365Bacpac decide si ejecuta
+    # el SQL personalizado según el parámetro esté presente o no (ContainsKey), no según
+    # su contenido. Pasar -CustomSqlFile '' lo daría por presente y fallaría al abrir el
+    # archivo.
+    if (-not [string]::IsNullOrWhiteSpace($CustomSqlFile)) {
+        if (-not (Test-Path -Path $CustomSqlFile -PathType Leaf)) {
+            throw "No se encontró el archivo de SQL personalizado: $CustomSqlFile"
+        }
+
+        $argumentosBacpac['CustomSqlFile'] = $CustomSqlFile
+        Write-Host "SQL previo al export: $CustomSqlFile"
+    }
+    else {
+        Write-Host 'Sin SQL previo al export: se exporta la base completa.'
+    }
+
+    New-D365Bacpac @argumentosBacpac
     Complete-Phase
 
     # -------------------------------------------------------------------------

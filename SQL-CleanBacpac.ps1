@@ -35,9 +35,14 @@
 .PARAMETER tablesToClean
     Lista separada por comas de las tablas cuyos datos se vacían. Admite comodines
     (por ejemplo 'AxxTaxFile*' o '*Staging'), que resuelve Get-D365BacpacTable.
-    Si se omite o llega vacía se usa la lista por defecto: tablas de log de D365
-    (DOCUHISTORY, EVENTCUD, SYSEXCEPTIONTABLE...), el juego completo de tablas BATCH*
-    y las tablas de integración propias.
+    Si se omite o llega vacía se usa la lista por defecto: los logs de plataforma y
+    auditoría (DOCUHISTORY, EVENTCUD, SYSEXCEPTIONTABLE, SYSUSERLOG, SYSDATABASELOG...),
+    el juego completo de tablas BATCH*, el log de ejecución de procesos
+    (PROCESSEXECUTION*) y el staging de importaciones (DMFSTAGING*, '*Staging').
+
+    Esta lista es la misma que el pipeline Migrate-DB-MultiEnv define en su JSON de
+    configuración, de modo que una corrida manual sin parámetros limpie exactamente lo
+    mismo que una corrida del pipeline.
 
 .PARAMETER tablesToExclude
     Lista separada por comas de tablas que NO deben limpiarse aunque coincidan con
@@ -83,9 +88,19 @@ $ErrorActionPreference = 'Stop'
 
 # Listas por defecto: son las que tenía hardcodeadas el script y se conservan para que
 # siga siendo usable a mano, sin parámetros.
-[string[]]$tablasPorDefecto = @('DOCUHISTORY', 'EVENTCUD', 'DMFSTAGINGLOGDETAILS', 'SYSEXCEPTIONTABLE', 'SYSENCRYPTIONLOG', 'SMMTransLog')
-$tablasPorDefecto += @('BATCH', 'BATCHCONSTRAINTS', 'BATCHCONSTRAINTSHISTORY', 'BATCHHISTORY', 'BATCHJOB', 'BATCHJOBALERTS', 'BATCHJOBHISTORY')
-$tablasPorDefecto += @('Nombre_tabla_Custom_o_patron_con_wildcard', '*Staging')
+# Logs de plataforma y de auditoría.
+[string[]]$tablasPorDefecto = @('DOCUHISTORY', 'EVENTCUD', 'SYSEXCEPTIONTABLE', 'SYSENCRYPTIONLOG', 'SMMTransLog', 'SYSUSERLOG', 'SYSDATABASELOG', 'SYSDATABASELOGLINES')
+
+# Juego completo de BATCH*. BATCHHISTORY suele ser la tabla más grande de una AxDB de
+# desarrollo: en un entorno medido concentraba el 17% de las filas de toda la base.
+$tablasPorDefecto += @('BATCH', 'BATCHCONSTRAINTS', 'BATCHCONSTRAINTSHISTORY', 'BATCHHISTORY', 'BATCHJOB', 'BATCHJOBALERTS', 'BATCHJOBHISTORY', 'BATCHJOBRECURRENCECOUNT')
+
+# Log de ejecución de procesos (DMF y afines).
+$tablasPorDefecto += @('PROCESSEXECUTIONSTATUSLOG', 'PROCESSEXECUTIONMESSAGELOG', 'PROCESSEXECUTIONSOURCELINK')
+
+# Staging de importaciones. El comodín cubre las tablas de staging de las entidades de
+# datos, que se regeneran solas en el destino.
+$tablasPorDefecto += @('DMFSTAGINGLOGDETAILS', 'DMFSTAGINGVALIDATIONLOG', '*Staging')
 
 [string[]]$exclusionesPorDefecto = @('dbo.OTRAS_TABLAS')
 
