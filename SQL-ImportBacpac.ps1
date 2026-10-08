@@ -9,9 +9,21 @@
     colapsable del log de Azure DevOps, y al final imprime una tabla
     Fase | Duración | Estado con lo que se ejecutó y lo que se salteó.
 
-    Fases, en orden: Verificar repo, Instalar d365fo.tools, Instalar SqlPackage,
-    Limpiar bacpac, Importar bacpac, Detener servicios, Switch de base,
-    Compilar modelos, Iniciar servicios, Sincronizar DB.
+    Fases, en orden: Verificar repo, Instalar d365fo.tools, Verificar base destino,
+    Instalar SqlPackage, Limpiar bacpac, Importar bacpac, Detener servicios,
+    Switch de base, Compilar modelos, Iniciar servicios, Sincronizar DB.
+
+    LA BASE DESTINO NO PUEDE EXISTIR DE ANTEMANO:
+    SqlPackage solo importa sobre una base nueva y vacía. Si ya existe una base con el
+    nombre del .bacpac (por ejemplo, el resto de una importación anterior que se cortó),
+    el script falla en 'Verificar base destino', antes de tocar el .bacpac, y no la
+    borra: decidir si se descarta es del operador.
+
+    CÓMO SE DECIDE QUE LA IMPORTACIÓN TERMINÓ BIEN:
+    la importación corre en un proceso aparte (SQL-ImportBacpacSqlPackage.ps1) cuya
+    salida se lee línea por línea y se reenvía al log. Se da por buena solo si
+    SqlPackage informó "Successfully imported database" y no informó ningún error. Que
+    la base exista no alcanza: una importación cortada también deja la base creada.
 
     Sin -includeSwitch el script se detiene después de importar: la base queda al
     costado, en paralelo, y el entorno en uso no se toca. Con -includeSwitch se
@@ -84,6 +96,12 @@
 .PARAMETER includeInstallSqlPackage
     Instala o actualiza SqlPackage antes de importar (Invoke-D365InstallSqlPackage).
     Normalmente no hace falta: los agentes ya lo tienen instalado.
+
+.PARAMETER includeUpdateD365foTools
+    Busca en PowerShell Gallery una versión más reciente de d365fo.tools y, si la hay,
+    actualiza el módulo (InstallOrUpdateD365foTools.ps1). Sin este modificador se usa
+    la versión instalada y no se consulta la galería. Si el módulo no está instalado,
+    se instala igual, con o sin este modificador.
 
 .PARAMETER skipBuildModels
     Omite la fase de compilación de modelos. Solo tiene efecto cuando además se pasó
@@ -160,6 +178,9 @@
 
 .LINK
     SQL-CleanBacpac.ps1
+
+.LINK
+    SQL-ImportBacpacSqlPackage.ps1
 #>
 [CmdletBinding()]
 param (
@@ -169,6 +190,8 @@ param (
     [switch]$includeSwitch,
 
     [switch]$includeInstallSqlPackage,
+
+    [switch]$includeUpdateD365foTools,
 
     [switch]$skipBuildModels,
 
@@ -245,9 +268,36 @@ try {
     # -------------------------------------------------------------------------
     $pasoActual = 'Instalar d365fo.tools'
     Start-Phase -Name $pasoActual
-    . "$PSScriptRoot\InstallOrUpdateD365foTools.ps1"
+    # Consultar la galería tarda aunque no haya nada que actualizar, y actualizar tarda
+    # minutos. Por eso solo se hace cuando se pide; instalar, en cambio, es obligatorio.
+    if ($includeUpdateD365foTools) {
+        . "$PSScriptRoot\InstallOrUpdateD365foTools.ps1"
+    }
+    elseif (-not (Get-Module -ListAvailable -Name d365fo.tools)) {
+        Write-Host 'El módulo d365fo.tools no está instalado. Se instala la versión más reciente.'
+        Install-Module -Name d365fo.tools
+    }
+    else {
+        Write-Host 'Se usa la versión instalada de d365fo.tools: no se recibió -includeUpdateD365foTools.'
+    }
     Write-Host 'Importando el módulo d365fo.tools'
     Import-Module -Name d365fo.tools
+    Complete-Phase
+
+    # -------------------------------------------------------------------------
+    $pasoActual = 'Verificar base destino'
+    Start-Phase -Name $pasoActual
+    # Va antes de 'Limpiar bacpac' porque esa fase modifica el .bacpac en el lugar: si
+    # la importación no puede correr, no tiene sentido tocar el archivo.
+    if (@(Get-D365Database -Name $ImportedDatabaseName).Count -gt 0) {
+        Complete-Phase -Status Failed
+        Write-PipelineError -Message "Ya existe una base de datos '$ImportedDatabaseName' en el servidor, y SqlPackage solo importa sobre una base nueva. Suele ser el resto de una importación anterior que se cortó, así que puede estar incompleta. No es la AxDB en uso. Si se puede descartar, borrala y volvé a ejecutar: ALTER DATABASE [$ImportedDatabaseName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$ImportedDatabaseName]; NO se tocó nada: ni el .bacpac, ni la base existente, ni el entorno."
+
+        # 'exit' dentro del try es control de flujo, no una excepción: el catch NO lo
+        # intercepta y el finally SÍ corre, así que el resumen de fases sale igual.
+        exit 1
+    }
+    Write-Host "No existe una base '$ImportedDatabaseName' previa: se puede importar."
     Complete-Phase
 
     # -------------------------------------------------------------------------
@@ -299,44 +349,53 @@ try {
     $pasoActual = 'Importar bacpac'
     Start-Phase -Name $pasoActual
     Write-Host "Importando la base $ImportedDatabaseName desde '$rutaBacpac' (MaxParallelism $MaxParallelism)"
-    # -ShowOriginalProgress es lo que hace que SqlPackage escriba su progreso en el log
-    # del run. Sin eso este paso, que dura horas, no imprime absolutamente nada.
-    Import-D365Bacpac -ImportModeTier1 `
-        -BacpacFile $rutaBacpac `
-        -NewDatabaseName $ImportedDatabaseName `
-        -MaxParallelism $MaxParallelism `
-        -ShowOriginalProgress
 
-    # NO BORRAR ESTA VERIFICACIÓN AUNQUE PAREZCA REDUNDANTE.
-    # Import-D365Bacpac NO lanza excepción cuando SqlPackage falla, y justamente por el
-    # -ShowOriginalProgress de arriba. La cadena es:
-    #   Import-D365Bacpac (línea 333) pasa -ShowOriginalProgress a Invoke-SqlPackage,
-    #   que se lo pasa a Invoke-Process (línea 224), y ahí el chequeo del código de
-    #   salida está escrito como:
-    #       if ($p.ExitCode -ne 0 -and (-not $ShowOriginalProgress))
-    #   o sea que con -ShowOriginalProgress el ExitCode NUNCA se evalúa. Además, en ese
-    #   modo Invoke-Process tampoco devuelve el objeto {stdout;stderr;ExitCode}, así que
-    #   no queda ni siquiera un valor de retorno para inspeccionar.
-    # Resultado: una importación fallida seguiría de largo hasta el switch y se llevaría
-    # puesto el entorno destino. Sacar -ShowOriginalProgress no es opción: la visibilidad
-    # de una fase de 2-3 horas es un requisito. Por eso se verifica el EFECTO en vez del
-    # código de salida: si la base existe, SqlPackage hizo su trabajo.
-    # Mismo criterio que Invoke-CHE-DbSync.ps1 en FO.DevTools, que valida la forma del
-    # objeto devuelto en vez de confiar en el silencio. Allá alcanza con el objeto porque
-    # ese script NO usa -ShowOriginalProgress; acá, como sí se usa, el único testigo
-    # confiable es la base de datos misma.
-    $baseImportada = @(Get-D365Database -Name $ImportedDatabaseName)
-    if ($baseImportada.Count -eq 0) {
-        # Falla cerrada a propósito: si Get-D365Database no pudo consultar el servidor
-        # tampoco devuelve nada, y frenar acá es siempre más seguro que seguir al switch.
+    # NO LLAMAR A Import-D365Bacpac DIRECTAMENTE DESDE ACÁ.
+    # Con -ShowOriginalProgress (imprescindible: sin eso una fase de horas no muestra
+    # nada), d365fo.tools lanza SqlPackage sin redirigir su salida y no evalúa su código
+    # de salida: una importación fallida no lanza excepción. Ese texto va directo a la
+    # consola y desde esta sesión no se puede leer. Ejecutando la importación en un
+    # powershell.exe hijo con la salida redirigida, SqlPackage hereda la redirección y
+    # cada línea llega acá a medida que se escribe: se reenvía al log y se guarda para
+    # decidir el resultado.
+    $salidaImportacion = New-Object -TypeName System.Collections.Generic.List[string]
+
+    # Con 'Stop', la primera línea de stderr de un comando nativo redirigida con 2>&1 se
+    # vuelve un error terminante en Windows PowerShell 5.1.
+    $preferenciaPrevia = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File "$PSScriptRoot\SQL-ImportBacpacSqlPackage.ps1" `
+            -rutaBacpac $rutaBacpac `
+            -nombreBase $ImportedDatabaseName `
+            -MaxParallelism $MaxParallelism 2>&1 |
+            ForEach-Object {
+                $linea = "$_"
+                Write-Host $linea
+                $salidaImportacion.Add($linea)
+            }
+        $codigoImportacion = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $preferenciaPrevia
+    }
+
+    # Se exige la confirmación explícita de SqlPackage. Que la base exista no prueba
+    # nada: una importación cortada a mitad de camino también la deja creada.
+    $importacionConfirmada = @($salidaImportacion | Where-Object { $_ -match 'Successfully imported database' }).Count -gt 0
+    $erroresSqlPackage = @($salidaImportacion | Where-Object { $_ -match '\*\*\* Error importing database|Error SQL\d+' })
+
+    if ($codigoImportacion -ne 0 -or -not $importacionConfirmada -or $erroresSqlPackage.Count -gt 0) {
         Complete-Phase -Status Failed
-        Write-PipelineError -Message "La importación del bacpac falló: la base de datos '$ImportedDatabaseName' no existe en el servidor después de ejecutar Import-D365Bacpac. SqlPackage puede haber fallado en silencio, porque -ShowOriginalProgress hace que d365fo.tools NO evalúe su código de salida. Revisá el log de SqlPackage más arriba para ver el error real. NO se tocó nada del entorno destino: no hubo switch, ni compilación, ni DB sync."
+        $detalle = if ($erroresSqlPackage.Count -gt 0) { " Primer error informado: $($erroresSqlPackage[0])" } else { '' }
+        Write-PipelineError -Message "La importación del bacpac falló: SqlPackage no confirmó 'Successfully imported database' (código de salida del proceso de importación: $codigoImportacion).$detalle La base '$ImportedDatabaseName' puede haber quedado creada e incompleta; hay que borrarla antes de reintentar. NO se tocó nada del entorno destino: no hubo switch, ni compilación, ni DB sync."
 
         # 'exit' dentro del try es control de flujo, no una excepción: el catch NO lo
         # intercepta y el finally SÍ corre, así que el resumen de fases sale igual.
         exit 1
     }
-    Write-Host "Verificación OK: la base '$ImportedDatabaseName' existe en el servidor."
+    Write-Host "Verificación OK: SqlPackage confirmó la importación de '$ImportedDatabaseName'."
     Complete-Phase
 
     # -------------------------------------------------------------------------
@@ -465,8 +524,8 @@ try {
             # los logs de xppc: son el único lugar donde queda constancia del resultado
             # real de cada módulo.
             #
-            # A diferencia de la fase 'Importar bacpac', acá NO se puede verificar el
-            # efecto barato: los assemblies ya existen de la compilación anterior, así
+            # Verificar el efecto tampoco sirve: los assemblies ya existen de la
+            # compilación anterior, así
             # que su presencia no prueba nada, y comparar LastWriteTime por módulo es
             # frágil (un módulo sin cambios puede no reescribirse).
             # TODO: hacer fallar la fase leyendo el XML que xppc deja en
