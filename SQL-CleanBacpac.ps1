@@ -40,7 +40,7 @@
     el juego completo de tablas BATCH*, el log de ejecución de procesos
     (PROCESSEXECUTION*) y el staging de importaciones (DMFSTAGING*, '*Staging').
 
-    Esta lista es la misma que el pipeline Migrate-DB-MultiEnv define en su JSON de
+    Esta lista es la misma que el pipeline Migrate-DB-MultiEnv-Bacpac define en su JSON de
     configuración, de modo que una corrida manual sin parámetros limpie exactamente lo
     mismo que una corrida del pipeline.
 

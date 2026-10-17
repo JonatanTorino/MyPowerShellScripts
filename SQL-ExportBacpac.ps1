@@ -94,7 +94,7 @@
 
     Ejecuta bacpac-cleanup.sql contra la copia de trabajo y recién después exporta, de
     modo que las tablas que ese SQL vacíe no se serialicen en el .bacpac. Es la forma
-    en que lo invoca el pipeline Migrate-DB-MultiEnv, que genera el .sql a partir de su
+    en que lo invoca el pipeline Migrate-DB-MultiEnv-Bacpac, que genera el .sql a partir de su
     JSON de configuración.
 
 .LINK
