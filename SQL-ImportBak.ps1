@@ -549,30 +549,34 @@ SELECT name AS Base,
             $resultadosCompilacion = @($modulosACompilar | Invoke-D365ModuleCompile -ShowOriginalProgress)
 
             # Con -ShowOriginalProgress, d365fo.tools no evalúa el código de salida de
-            # xppc: el resultado real se lee del log de cada paquete.
+            # xppc: el resultado real se lee del log de cada paquete. Un resultado que no
+            # se puede leer cuenta como fallo: xppc abortado deja el log sin resumen.
             $totalErrores = 0
-            $logsConErrores = @()
+            $fallos = @()
+            if ($resultadosCompilacion.Count -ne $modulosACompilar.Count) {
+                $fallos += "se pidieron $($modulosACompilar.Count) paquete(s) y d365fo.tools devolvió $($resultadosCompilacion.Count) resultado(s)"
+            }
             foreach ($resultado in $resultadosCompilacion) {
                 try {
                     $conteo = Get-D365CompilerResult -Path $resultado.LogFile -OutputAsObjects -ErrorAction Stop
                     if ($null -eq $conteo) {
-                        Write-PipelineWarning -Message "No se encontró el log de compilación '$($resultado.LogFile)'."
+                        $fallos += "no se encontró el log '$($resultado.LogFile)'"
                         continue
                     }
                     Write-Host ("  {0}: {1} error(es), {2} advertencia(s)" -f $resultado.LogFile, $conteo.Errors, $conteo.Warnings)
                     if ($conteo.Errors -gt 0) {
                         $totalErrores += $conteo.Errors
-                        $logsConErrores += $resultado.LogFile
+                        $fallos += "$($conteo.Errors) error(es) en '$($resultado.LogFile)'"
                     }
                 }
                 catch {
-                    Write-PipelineWarning -Message "No se pudo leer el resultado de compilación de '$($resultado.LogFile)': $($_.Exception.Message)"
+                    $fallos += "no se pudo leer '$($resultado.LogFile)': $($_.Exception.Message)"
                 }
             }
 
             # No se lanza excepción: cortaría la corrida con el AOS detenido y sin DB sync.
-            if ($totalErrores -gt 0) {
-                Write-PipelineError -Message "La compilación terminó con $totalErrores error(es) en: $($logsConErrores -join ', '). La corrida sigue para levantar los servicios y correr el DB sync, pero el step va a terminar en rojo."
+            if ($fallos.Count -gt 0) {
+                Write-PipelineError -Message "La compilación no terminó bien ($totalErrores error(es) de xppc): $($fallos -join '; '). La corrida sigue para levantar los servicios y correr el DB sync, pero el step va a terminar en rojo."
                 $huboErroresDeCompilacion = $true
                 Complete-Phase -Status Failed
             }
